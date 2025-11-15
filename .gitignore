@@ -1,0 +1,23 @@
+# Environment variables (contains sensitive information)
+.env
+
+# Data directories
+weblate-data/
+postgres-data/
+gitlab-data/
+
+# Backups
+*.tar.gz
+*.sql
+*.dump
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

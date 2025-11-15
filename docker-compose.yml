@@ -1,0 +1,119 @@
+version: '3'
+
+services:
+  # PostgreSQL 資料庫
+  database:
+    image: postgres:15-alpine
+    container_name: weblate_postgres
+    env_file:
+      - .env
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - weblate-network
+
+  # Redis 快取
+  redis:
+    image: redis:7-alpine
+    container_name: weblate_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - weblate-network
+
+  # Weblate 主服務
+  weblate:
+    image: weblate/weblate:latest
+    container_name: weblate
+    env_file:
+      - .env
+    volumes:
+      - ./weblate-data:/app/data
+    expose:
+      - "8080"
+    restart: unless-stopped
+    depends_on:
+      - database
+      - redis
+    networks:
+      - weblate-network
+    environment:
+      WEBLATE_EMAIL_HOST: ${WEBLATE_EMAIL_HOST}
+      WEBLATE_EMAIL_HOST_USER: ${WEBLATE_EMAIL_HOST_USER}
+      WEBLATE_EMAIL_HOST_PASSWORD: ${WEBLATE_EMAIL_HOST_PASSWORD}
+      WEBLATE_SERVER_EMAIL: ${WEBLATE_SERVER_EMAIL}
+      WEBLATE_DEFAULT_FROM_EMAIL: ${WEBLATE_DEFAULT_FROM_EMAIL}
+      WEBLATE_ALLOWED_HOSTS: ${WEBLATE_ALLOWED_HOSTS},weblate.local
+      WEBLATE_ADMIN_PASSWORD: ${WEBLATE_ADMIN_PASSWORD}
+      WEBLATE_ADMIN_EMAIL: ${WEBLATE_ADMIN_EMAIL}
+      WEBLATE_ADMIN_NAME: ${WEBLATE_ADMIN_NAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      GIT_SSL_NO_VERIFY: "1"
+
+  # Nginx 反向代理 + HTTPS
+  nginx:
+    image: nginx:alpine
+    container_name: weblate_nginx
+    ports:
+      - "8080:443"   # HTTPS 對外
+      - "8082:80"    # HTTP 內部或重導用
+    volumes:
+      - ./nginx/conf/weblate.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - weblate
+    restart: unless-stopped
+    networks:
+      - weblate-network
+
+  # GitLab 自架實例
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: gitlab
+    hostname: gitlab.local
+    restart: unless-stopped
+    ports:
+      - "8081:443"   # GitLab HTTPS
+      - "2222:22"    # SSH
+      - "8083:80"    # GitLab HTTP
+    volumes:
+      - ./gitlab-data/config:/etc/gitlab
+      - ./gitlab-data/logs:/var/log/gitlab
+      - ./gitlab-data/data:/var/opt/gitlab
+      - ./ssl/gitlab.local.crt:/etc/gitlab/ssl/gitlab.local.crt:ro
+      - ./ssl/gitlab.local.key:/etc/gitlab/ssl/gitlab.local.key:ro
+    networks:
+      - weblate-network
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'https://gitlab.local:8081'
+        gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD}'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2222
+
+        # 啟用 HTTPS + 自簽憑證
+        nginx['listen_port'] = 443
+        nginx['listen_https'] = true
+        nginx['ssl_certificate'] = '/etc/gitlab/ssl/gitlab.local.crt'
+        nginx['ssl_certificate_key'] = '/etc/gitlab/ssl/gitlab.local.key'
+        nginx['redirect_http_to_https'] = true
+
+        # 同時保留 HTTP 供內網使用
+        nginx['custom_gitlab_server_config'] = "listen 80;"
+    shm_size: '256m'
+
+# 網路與磁碟區定義
+networks:
+  weblate-network:
+    driver: bridge
+
+volumes:
+  redis-data:
