@@ -1,241 +1,145 @@
-# Weblate + GitLab Docker Setup
+# Weblate + GitLab Auto-Setup
 
-This project contains a complete Docker-based setup for running Weblate (a web-based translation tool) and GitLab (a Git repository platform) for testing version control integration.
+Automated setup for Weblate with GitLab integration and Google Translate.
 
-## Prerequisites
+## Setup Steps for Fresh Environment
 
-- Docker installed on your system
-- Docker Compose installed on your system
+1. **Start the containers:**
+   ```bash
+   docker compose up -d
+   ```
 
-## Project Structure
+2. **Wait for initialization** (especially GitLab - can take 2-3 minutes)
+   - Check GitLab status: `docker logs gitlab`
+   - GitLab is ready when you see "Reconfigured" messages
 
-```
-.
-├── docker-compose.yml      # Docker services configuration
-├── .env                    # Environment variables (DO NOT COMMIT TO GIT)
-├── weblate-data/          # Weblate data directory (auto-created)
-├── postgres-data/         # PostgreSQL data (auto-created)
-├── gitlab-data/           # GitLab data directory (auto-created)
-└── README.md              # This file
-```
+3. **Create .env file:**
+   ```bash
+   cp .env.template .env
+   nano .env
+   ```
 
-## Quick Start
+   Update these values in `.env`:
+   - `WEBLATE_MT_GOOGLE_KEY` - Your Google Translate API key
+   - `GITLAB_PROJECT_NAMESPACE` - GitLab namespace (e.g., "test")
+   - `GITLAB_PROJECT_NAME` - GitLab project name (e.g., "test-translation")
+   - `TARGET_LANGUAGES` - Languages to translate to (e.g., "ja,fr,zh_Hant_HK")
 
-### 1. Configure Environment Variables
+4. **Create GitLab project manually:**
+   - Open https://gitlab.local:8081/projects/new
+   - Login with root / `GITLAB_ROOT_PASSWORD` from .env
+   - Create project with name from `GITLAB_PROJECT_NAME`
+   - Add initial translation file (e.g., `en-US.json` with `{"welcome": "Welcome to app"}`)
 
-Edit the `.env` file and update the following important settings:
+5. **Run auto-setup:**
+   ```bash
+   ./auto-setup.sh
+   ```
 
-- `WEBLATE_ADMIN_PASSWORD`: Change to a secure password
-- `POSTGRES_PASSWORD`: Change to a secure password
-- `WEBLATE_ADMIN_EMAIL`: Set your admin email
-- `WEBLATE_SECRET_KEY`: Generate a random secret key for production
-- `GITLAB_ROOT_PASSWORD`: Change to a secure password for GitLab
+6. **During script execution:**
+   - **Step 1**: The script extracts Weblate's SSH public key and saves it to `weblate_ssh_key.pub`
+     - This is the same key visible at https://weblate.local:8080/manage/ssh/
+     - Weblate automatically generates this key when first started
 
-### 2. Start the Services
+   - **Step 2**: When prompted, verify your GitLab project exists and press Enter
 
-Run the following command to start all services:
+   - **Step 3**: Add the SSH key to GitLab as a deploy key:
+     - Open the generated `weblate_ssh_key.pub` file (or copy from https://weblate.local:8080/manage/ssh/)
+     - Go to GitLab: your project → Settings → Repository → Deploy Keys → Expand
+     - Click "Add new key"
+     - Title: `Weblate`
+     - Key: Paste the content from `weblate_ssh_key.pub`
+     - **Important**: Check "Grant write permissions"
+     - Click "Add key"
+     - Return to terminal and press Enter to continue
 
-```bash
-docker-compose up -d
-```
+## What It Does
 
-This will:
-- Download the required Docker images (PostgreSQL, Redis, Weblate, GitLab)
-- Create the necessary containers
-- Set up the database
-- Start Weblate on port 8080
-- Start GitLab on port 8081
+The script automatically:
+- ✅ Generates Weblate SSH key
+- ✅ Creates Weblate project
+- ✅ Connects to GitLab repository
+- ✅ Adds all target languages
+- ✅ Enables Google Translate auto-translation
+- ✅ Translates existing strings
+- ✅ Pushes translations to GitLab
 
-**Note:** GitLab takes 3-5 minutes to fully start up for the first time.
+## Access
 
-### 3. Access the Services
+- **Weblate**: https://weblate.local:8080
+- **GitLab**: https://gitlab.local:8081
 
-Once the containers are running:
+## Translation Workflow
 
-**Weblate:** http://localhost:8080
-- **Username**: `admin`
-- **Password**: The value of `WEBLATE_ADMIN_PASSWORD`
+```mermaid
+sequenceDiagram
+    participant Dev as 👨‍💻 Developer
+    participant GitLab as 📦 GitLab Repository
+    participant Weblate as 🌍 Weblate Platform
+    participant Google as 🤖 Google Translate
+    participant App as 🌐 Your Application
 
-**GitLab:** http://localhost:8081
-- **Username**: `root`
-- **Password**: The value of `GITLAB_ROOT_PASSWORD`
+    Dev->>GitLab: Create/edit en-US.json<br/>{"welcome": "Welcome to app"}
+    Dev->>GitLab: git commit & push
+    Note over GitLab: Source translation<br/>file updated
 
-**Important:** GitLab requires 3-5 minutes to initialize on first startup. Check status with:
-```bash
-docker compose logs -f gitlab
-```
+    GitLab->>Weblate: Auto-pull (or manual update)
+    Weblate->>GitLab: Pull latest en-US.json
+    GitLab-->>Weblate: Return source file
 
-## Managing the Services
+    Weblate->>Weblate: Detect new/changed strings
+    Note over Weblate: Found: "Welcome to app"<br/>needs translation
 
-### View logs
+    Weblate->>Google: Auto-translate to ja, fr, zh_Hant_HK
+    Google-->>Weblate: Return translations
+    Note over Google,Weblate: ja: "アプリへようこそ"<br/>fr: "Bienvenue dans l'application"<br/>zh: "歡迎使用應用程式"
 
-```bash
-docker-compose logs -f
-```
+    Weblate->>Weblate: Create translation files
+    Note over Weblate: Generated:<br/>ja.json, fr.json, zh_Hant_HK.json
 
-### View logs for a specific service
+    Weblate->>Weblate: Auto-commit translations
+    Weblate->>GitLab: Auto-push via SSH
+    Note over Weblate,GitLab: ✅ Automatic push enabled:<br/>• Deploy key with write permissions<br/>• SSH config configured<br/>• push_on_commit: True
 
-```bash
-docker-compose logs -f weblate
-docker-compose logs -f gitlab
-docker-compose logs -f database
-docker-compose logs -f redis
-```
+    GitLab-->>GitLab: Translations committed
 
-### Stop the services
+    App->>GitLab: Pull translation files
+    GitLab-->>App: Return all locale files
+    App->>App: Load translations
 
-```bash
-docker-compose down
-```
-
-### Stop and remove all data
-
-```bash
-docker-compose down -v
-rm -rf weblate-data postgres-data
-```
-
-### Restart services
-
-```bash
-docker-compose restart
-```
-
-### Update Weblate to the latest version
-
-```bash
-docker-compose pull weblate
-docker-compose up -d weblate
-```
-
-## Data Persistence
-
-All data is stored in local directories:
-
-- `./weblate-data/`: Weblate application data, translations, and files
-- `./postgres-data/`: PostgreSQL database files
-- `./gitlab-data/`: GitLab configuration, logs, and repositories
-- Redis data is stored in a Docker volume
-
-## Integrating Weblate with GitLab
-
-### 1. Create a GitLab Project
-
-1. Access GitLab at http://localhost:8081
-2. Login with username `root` and your `GITLAB_ROOT_PASSWORD`
-3. Create a new project for your translations
-4. Note the project's Git URL (e.g., `http://gitlab/root/my-translations.git`)
-
-### 2. Generate GitLab Personal Access Token
-
-1. In GitLab: User Settings → Access Tokens
-2. Create a token with `api`, `read_repository`, and `write_repository` scopes
-3. Copy the token (you'll need it in Weblate)
-
-### 3. Configure Weblate to Use GitLab
-
-1. Access Weblate at http://localhost:8080
-2. Go to Settings → Version control systems
-3. Add GitLab as a VCS backend:
-   - Repository URL: Use `http://gitlab/root/your-project.git` (use container name `gitlab`)
-   - Authentication: Use the personal access token from step 2
-
-### 4. SSH Configuration (Alternative)
-
-For SSH access between containers:
-
-1. Generate SSH keys in Weblate container
-2. Add the public key to GitLab Deploy Keys
-3. Use SSH URL: `git@gitlab:root/your-project.git`
-
-**Note:** Both containers are on the same Docker network (`weblate-network`), so they can communicate using container names (`gitlab`, `weblate`).
-
-## Troubleshooting
-
-### Container won't start
-
-Check the logs:
-```bash
-docker-compose logs
+    Note over Dev,App: 🔄 Continuous cycle:<br/>Edit source → Auto-translate → Auto-push → Deploy
 ```
 
-### Port 8080 already in use
+## Automatic Push Configuration
 
-Edit `docker-compose.yml` and change the port mapping:
-```yaml
-ports:
-  - "8081:8080"  # Change 8081 to any available port
-```
+Weblate automatically pushes translations back to GitLab because:
 
-### Reset admin password
+1. **Deploy key has write permissions** ✓
+   - Location: GitLab UI (Project → Settings → Repository → Deploy Keys)
+   - Configured manually during auto-setup.sh Step 3
 
-```bash
-docker-compose exec weblate weblate changepassword admin
-```
+2. **SSH config is properly configured** ✓
+   - Location: `/app/data/ssh/config` inside Weblate container
+   - Created by: `auto-setup.sh` Step 4
+   - Verify: `docker exec weblate cat /app/data/ssh/config`
 
-### Database connection issues
+3. **Component has `push_on_commit: True`** ✓
+   - Location: Weblate database (PostgreSQL)
+   - Set by: `auto-setup.sh` Step 6
+   - Verify: Check at https://weblate.local:8080/projects/test-translation/gitlab/
 
-Make sure all containers are running:
-```bash
-docker-compose ps
-```
+## Auto-Translation
 
-### GitLab takes too long to start
+When enabled, translations happen automatically when:
+- New languages are added
+- New strings are pushed to GitLab
+- Source strings are modified
 
-GitLab is resource-intensive and requires:
-- At least 4GB RAM allocated to Docker
-- 3-5 minutes for initial startup
-- Check startup progress: `docker compose logs -f gitlab`
+Translations are committed and **automatically pushed back to GitLab** without manual intervention.
 
-### GitLab shows 502 error
+## Files
 
-Wait a few more minutes - GitLab is still initializing. Check logs for "Listening on" message.
-
-## Email Configuration (Optional)
-
-To enable email notifications, update these variables in `.env`:
-
-```env
-WEBLATE_EMAIL_HOST=smtp.example.com
-WEBLATE_EMAIL_HOST_USER=your-email@example.com
-WEBLATE_EMAIL_HOST_PASSWORD=your-password
-WEBLATE_SERVER_EMAIL=weblate@example.com
-WEBLATE_DEFAULT_FROM_EMAIL=weblate@example.com
-```
-
-Then restart the services:
-```bash
-docker-compose restart weblate
-```
-
-## Security Notes
-
-- Change all default passwords before deploying to production
-- Generate a strong random secret key for `WEBLATE_SECRET_KEY`
-- Set `WEBLATE_DEBUG=0` in production
-- Update `WEBLATE_ALLOWED_HOSTS` with your actual domain
-- Keep your `.env` file secure and never commit it to version control
-- Regularly backup the `weblate-data` and `postgres-data` directories
-
-## Backup
-
-To backup your data:
-
-```bash
-# Stop the containers
-docker-compose down
-
-# Backup all data directories
-tar -czf backup-$(date +%Y%m%d).tar.gz weblate-data postgres-data gitlab-data
-
-# Restart the containers
-docker-compose up -d
-```
-
-## Resources
-
-- [Weblate Documentation](https://docs.weblate.org/)
-- [Weblate Docker Image](https://hub.docker.com/r/weblate/weblate)
-- [GitLab Documentation](https://docs.gitlab.com/)
-- [GitLab Docker Image](https://hub.docker.com/r/gitlab/gitlab-ce)
-- [Docker Documentation](https://docs.docker.com/)
+- `.env.template` - Configuration template
+- `auto-setup.sh` - Automated project setup
+- `docker-compose.yml` - Docker services
+- `weblate_ssh_key.pub` - Generated SSH key (add to GitLab)
