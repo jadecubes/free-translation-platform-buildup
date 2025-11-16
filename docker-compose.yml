@@ -108,7 +108,17 @@ services:
 
         # 同時保留 HTTP 供內網使用
         nginx['custom_gitlab_server_config'] = "listen 80;"
-    shm_size: '256m'
+
+        # macOS Docker compatibility - disable Unix socket for workhorse
+        gitlab_workhorse['listen_network'] = "tcp"
+        gitlab_workhorse['listen_addr'] = "127.0.0.1:8181"
+
+        # 性能優化設定
+        puma['worker_processes'] = 2
+        sidekiq['max_concurrency'] = 10
+        postgresql['shared_buffers'] = "256MB"
+        prometheus_monitoring['enable'] = false
+    shm_size: '1g'
 
 # 網路與磁碟區定義
 networks:
