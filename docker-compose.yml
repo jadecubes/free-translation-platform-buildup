@@ -58,6 +58,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       GIT_SSL_NO_VERIFY: "1"
+      GIT_SSH_COMMAND: "ssh -F /app/data/ssh/config -o UserKnownHostsFile=/app/data/ssh/known_hosts -o StrictHostKeyChecking=no"
 
   # Nginx 反向代理 + HTTPS
   nginx:
@@ -119,6 +120,20 @@ services:
         postgresql['shared_buffers'] = "256MB"
         prometheus_monitoring['enable'] = false
     shm_size: '1g'
+
+  # Webhook Reload Service for react-i18next
+  webhook-reloader:
+    build:
+      context: .
+      dockerfile: Dockerfile.webhook
+    container_name: webhook-reloader
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - weblate-network
+    restart: unless-stopped
+    expose:
+      - "5000"
 
 # 網路與磁碟區定義
 networks:
