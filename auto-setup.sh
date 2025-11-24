@@ -182,7 +182,10 @@ component, created = Component.objects.get_or_create(
         'new_base': '${NEW_BASE}',
         'vcs': 'git',
         'push_on_commit': True,
-        'commit_pending_age': 24,
+        'commit_pending_age': 0,
+        'manage_units': True,
+        'update_linguas': True,
+        'update_interval': 1,
     }
 )
 
@@ -192,8 +195,14 @@ if created:
     print('✓ Initial repository update complete')
 else:
     print('✓ Component already exists: ${WEBLATE_COMPONENT_NAME}')
+    # Update settings for existing component
+    component.manage_units = True
+    component.update_linguas = True
+    component.update_interval = 1
+    component.push_on_commit = True
+    component.save()
     component.do_update()
-    print('✓ Repository updated')
+    print('✓ Repository updated and settings configured')
 PYEOF"
 
 log_success "Component configured and synced with GitLab"
@@ -279,9 +288,151 @@ if [ "$AUTO_TRANSLATE_ENABLED" = "true" ]; then
 fi
 
 # ========================================
-# Step 11: Commit and Push
+# Step 11: Fix SSH Known Hosts
 # ========================================
-log_info "Step 11: Committing and pushing translations..."
+log_info "Step 11: Fixing SSH known_hosts for GitLab..."
+docker exec weblate bash -c 'ssh-keyscan -p 22 gitlab > /app/data/ssh/known_hosts 2>/dev/null && chmod 600 /app/data/ssh/known_hosts'
+log_success "SSH known_hosts updated"
+echo ""
+
+# ========================================
+# Step 12: Create GitLab Webhook
+# ========================================
+log_info "Step 12: Creating GitLab webhook for automatic updates..."
+
+# Generate GitLab API token if not exists
+if [ -z "$GITLAB_API_TOKEN" ]; then
+    log_info "Creating GitLab personal access token..."
+    log_warning "This may take 30-60 seconds (GitLab Rails is loading)..."
+
+    # Create a personal access token using GitLab Rails console
+    GITLAB_API_TOKEN=$(docker exec gitlab gitlab-rails runner "
+      user = User.find_by(username: 'test')
+      if user.nil?
+        puts 'ERROR: User test not found'
+        exit 1
+      end
+
+      # Check if token already exists
+      existing_token = user.personal_access_tokens.find_by(name: 'Weblate Webhook')
+      if existing_token && existing_token.active?
+        puts 'EXISTING_TOKEN_FOUND'
+        exit 0
+      end
+
+      token = user.personal_access_tokens.create(
+        name: 'Weblate Webhook',
+        scopes: ['api'],
+        expires_at: Date.today + 365
+      )
+      token.set_token('$(openssl rand -hex 20)')
+      token.save!
+      puts token.token
+    " 2>/dev/null | tail -1)
+
+    if [ "$GITLAB_API_TOKEN" = "EXISTING_TOKEN_FOUND" ]; then
+        log_warning "A token named 'Weblate Webhook' already exists in GitLab"
+        log_info "Skipping token creation. Please add existing token to .env if webhook creation fails."
+        GITLAB_API_TOKEN=""
+    elif [ "$GITLAB_API_TOKEN" = "ERROR: User test not found" ]; then
+        log_error "GitLab user 'test' not found"
+        log_warning "Skipping webhook creation"
+        GITLAB_API_TOKEN=""
+    elif [ -n "$GITLAB_API_TOKEN" ]; then
+        log_success "GitLab API token created: ${GITLAB_API_TOKEN:0:10}..."
+
+        # Add to .env file if not present
+        if ! grep -q "GITLAB_API_TOKEN" .env; then
+            echo "" >> .env
+            echo "# GitLab API Token (auto-generated)" >> .env
+            echo "GITLAB_API_TOKEN=${GITLAB_API_TOKEN}" >> .env
+            log_success "Token saved to .env file"
+        fi
+    else
+        log_error "Failed to create GitLab API token"
+        log_warning "You'll need to create the webhook manually"
+    fi
+else
+    log_info "Using existing GitLab API token from .env"
+fi
+
+if [ -n "$GITLAB_API_TOKEN" ]; then
+    # Create TWO webhooks in GitLab for complete workflow
+    log_info "Creating GitLab webhooks for automatic translation..."
+
+    # Webhook 1: Weblate's built-in GitLab webhook
+    # This notifies Weblate about GitLab pushes and updates Weblate's UI/tracking
+    log_info "Creating Weblate notification webhook..."
+    WEBLATE_WEBHOOK_URL="http://weblate:8080/hooks/gitlab/"
+
+    WEBHOOK_RESPONSE_1=$(docker exec gitlab curl -s \
+        --request POST \
+        --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+        --header "Content-Type: application/json" \
+        --data "{
+            \"url\": \"${WEBLATE_WEBHOOK_URL}\",
+            \"push_events\": true,
+            \"enable_ssl_verification\": false,
+            \"token\": \"\"
+        }" \
+        "http://127.0.0.1:8181/api/v4/projects/${GITLAB_PROJECT_NAMESPACE}%2F${GITLAB_PROJECT_NAME}/hooks" 2>/dev/null)
+
+    if echo "$WEBHOOK_RESPONSE_1" | grep -q '"id"'; then
+        log_success "✓ Weblate notification webhook created"
+        log_info "  URL: ${WEBLATE_WEBHOOK_URL}"
+    else
+        log_warning "Weblate webhook creation failed or already exists"
+    fi
+
+    # Webhook 2: Custom auto-translation webhook
+    # This triggers: pull → loadpo → auto-translate → commit → push
+    log_info "Creating auto-translation workflow webhook..."
+    RELOAD_WEBHOOK_URL="http://webhook-reloader:5000/reload"
+
+    WEBHOOK_RESPONSE_2=$(docker exec gitlab curl -s \
+        --request POST \
+        --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+        --header "Content-Type: application/json" \
+        --data "{
+            \"url\": \"${RELOAD_WEBHOOK_URL}\",
+            \"push_events\": true,
+            \"enable_ssl_verification\": false,
+            \"token\": \"\"
+        }" \
+        "http://127.0.0.1:8181/api/v4/projects/${GITLAB_PROJECT_NAMESPACE}%2F${GITLAB_PROJECT_NAME}/hooks" 2>/dev/null)
+
+    if echo "$WEBHOOK_RESPONSE_2" | grep -q '"id"'; then
+        log_success "✓ Auto-translation webhook created"
+        log_info "  URL: ${RELOAD_WEBHOOK_URL}"
+        echo ""
+        log_success "✓✓ Complete automatic translation workflow enabled!"
+        log_info "  Webhook 1: Keeps Weblate in sync with GitLab"
+        log_info "  Webhook 2: Auto-translates and pushes translations back"
+        log_info "  Total time: ~5-10 seconds from push to translated files"
+    else
+        log_warning "Auto-translation webhook creation failed or already exists"
+    fi
+else
+    log_warning "Skipping webhook creation (no API token)"
+    log_info "To enable automatic translation workflow, manually create TWO webhooks:"
+    echo ""
+    log_info "Webhook 1 - Weblate Notification:"
+    log_info "  URL: http://weblate:8080/hooks/gitlab/"
+    log_info "  Purpose: Notifies Weblate about GitLab pushes"
+    echo ""
+    log_info "Webhook 2 - Auto-Translation:"
+    log_info "  URL: http://webhook-reloader:5000/reload"
+    log_info "  Purpose: Triggers auto-translation workflow"
+    echo ""
+    log_info "Add both at: https://gitlab.local:8081/${GITLAB_PROJECT_NAMESPACE}/${GITLAB_PROJECT_NAME}/-/hooks"
+    log_info "Settings: Push events enabled, SSL verification disabled"
+fi
+echo ""
+
+# ========================================
+# Step 13: Commit and Push
+# ========================================
+log_info "Step 13: Committing and pushing translations..."
 docker exec weblate weblate commit_pending "${WEBLATE_PROJECT_SLUG}/${WEBLATE_COMPONENT_SLUG}" --age 0 || true
 docker exec weblate weblate pushgit "${WEBLATE_PROJECT_SLUG}/${WEBLATE_COMPONENT_SLUG}" || log_warning "Push may have failed - check SSH key"
 
@@ -295,7 +446,7 @@ echo "=========================================="
 echo "  Setup Complete!"
 echo "=========================================="
 echo ""
-log_success "Weblate: https://weblate.local:8080/projects/${WEBLATE_PROJECT_SLUG}/"
+log_success "Weblate: https://${WEBLATE_SITE_DOMAIN}/projects/${WEBLATE_PROJECT_SLUG}/"
 log_success "GitLab: https://gitlab.local:8081/${GITLAB_PROJECT_NAMESPACE}/${GITLAB_PROJECT_NAME}"
 echo ""
 log_info "Configuration:"
@@ -303,7 +454,10 @@ echo "  - Source language: ${SOURCE_LANGUAGE}"
 echo "  - Target languages: ${TARGET_LANGUAGES}"
 echo "  - Auto-translation: ${AUTO_TRANSLATE_ENABLED} (mode: ${AUTO_TRANSLATE_MODE})"
 echo "  - Admin user: ${WEBLATE_ADMIN_USER}"
+echo "  - Auto-sync: GitLab → Weblate (via webhook)"
 echo ""
-log_info "GitLab API Token (save this):"
-echo "  ${GITLAB_TOKEN}"
-echo ""
+if [ -n "$GITLAB_API_TOKEN" ]; then
+    log_info "GitLab API Token (saved in .env):"
+    echo "  ${GITLAB_API_TOKEN:0:10}...${GITLAB_API_TOKEN: -10}"
+    echo ""
+fi
