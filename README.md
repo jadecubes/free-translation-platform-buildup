@@ -235,7 +235,7 @@ Once your image is on Docker Hub, deploy anywhere:
 ```bash
 # 1. Clone and configure
 git clone <your-repo>
-cd myweblate
+cd <your-repo-path>
 cp .env.template .env
 nano .env  # Set DOCKER_HUB_WEBHOOK_REPO
 
