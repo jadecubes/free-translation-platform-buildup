@@ -3,6 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install Docker CLI and Flask
+# Multi-architecture support for amd64, arm64, armv7
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
@@ -14,7 +15,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get update \
     && apt-get install -y docker-ce-cli \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install flask
+    && pip install --no-cache-dir flask
 
 # Copy the webhook service
 COPY webhook-reload-service.py /app/
