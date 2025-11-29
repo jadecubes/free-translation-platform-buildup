@@ -29,7 +29,31 @@ fi
 
 source .env
 
+# ========================================
+# Detect and Set Architecture
+# ========================================
+ARCH=$(uname -m)
+PLATFORM=""
+
+case $ARCH in
+    x86_64)
+        PLATFORM="linux/amd64"
+        ;;
+    aarch64|arm64)
+        PLATFORM="linux/arm64"
+        ;;
+    armv7l)
+        PLATFORM="linux/arm/v7"
+        ;;
+    *)
+        PLATFORM="linux/amd64"
+        ;;
+esac
+
+export DOCKER_DEFAULT_PLATFORM=$PLATFORM
+
 log_info "Starting Weblate auto-setup..."
+log_info "Platform: $PLATFORM ($ARCH)"
 echo ""
 
 # ========================================
