@@ -52,6 +52,7 @@ Use this for testing and learning. Includes a bundled GitLab instance.
    - `GITLAB_PROJECT_NAMESPACE` - GitLab group (e.g., `test`)
    - `GITLAB_PROJECT_NAME` - Project name (e.g., `test-translation`)
    - `TARGET_LANGUAGES` - Languages to translate (e.g., `ja,fr,zh_Hant_HK`)
+   - `PUSH_ON_COMMIT` - Set to `true` to auto-push translations, `false` for manual review (default: `true`)
 
 3. **Create GitLab project**
    - Open https://gitlab.local:8081
@@ -689,27 +690,70 @@ docker exec gitlab curl -X POST http://webhook-reloader:5000/reload \
 ## Architecture
 
 ```mermaid
-graph LR
-    A[👨‍💻 Developer] -->|1. Edit en-US.json| B[GitLab]
-    B -->|2. Webhook| C[Weblate]
-    C -->|3. Pull changes| B
-    C -->|4. Auto-translate| D[Google Translate]
-    D -->|5. Translations| C
-    C -->|6. Auto-commit & push| B
-    B -->|7. Deploy| E[🌐 Application]
+sequenceDiagram
+    participant Dev as 👨‍💻 Developer
+    participant GitLab as 📦 GitLab Repository
+    participant Weblate as 🌍 Weblate Platform
+    participant Google as 🤖 Google Translate
+    participant App as 🌐 Your Application
 
-    style C fill:#4CAF50
-    style B fill:#FC6D26
-    style D fill:#4285F4
+    Dev->>GitLab: Create/edit en-US.json<br/>{"welcome": "Welcome to app"}
+    Dev->>GitLab: git commit & push
+    Note over GitLab: Source translation<br/>file updated
+
+    GitLab->>Weblate: Auto-pull (or manual update)
+    Weblate->>GitLab: Pull latest en-US.json
+    GitLab-->>Weblate: Return source file
+
+    Weblate->>Weblate: Detect new/changed strings
+    Note over Weblate: Found: "Welcome to app"<br/>needs translation
+
+    Weblate->>Google: Auto-translate to ja, fr, zh_Hant_HK
+    Google-->>Weblate: Return translations
+    Note over Google,Weblate: ja: "アプリへようこそ"<br/>fr: "Bienvenue dans l'application"<br/>zh: "歡迎使用應用程式"
+
+    Weblate->>Weblate: Create translation files
+    Note over Weblate: Generated:<br/>ja.json, fr.json, zh_Hant_HK.json
+
+    Weblate->>Weblate: Auto-commit translations
+    Weblate->>GitLab: Auto-push via SSH
+    Note over Weblate,GitLab: ✅ Automatic push enabled:<br/>• Deploy key with write permissions<br/>• SSH config configured<br/>• push_on_commit: True
+
+    GitLab-->>GitLab: Translations committed
+
+    App->>GitLab: Pull translation files
+    GitLab-->>App: Return all locale files
+    App->>App: Load translations
+
+    Note over Dev,App: 🔄 Continuous cycle:<br/>Edit source → Auto-translate → Auto-push → Deploy
 ```
 
-**Complete automatic cycle:**
-1. Push source file to GitLab
-2. GitLab webhook notifies Weblate
-3. Weblate pulls changes
-4. Weblate auto-translates via Google Translate
-5. Weblate commits and pushes translations back to GitLab
-6. All language files available in GitLab
+## Automatic Push Configuration
+
+Weblate automatically pushes translations back to GitLab because:
+
+1. **Deploy key has write permissions** ✓
+   - Location: GitLab UI (Project → Settings → Repository → Deploy Keys)
+   - Configured manually during auto-setup.sh Step 3
+
+2. **SSH config is properly configured** ✓
+   - Location: `/app/data/ssh/config` inside Weblate container
+   - Created by: `auto-setup.sh` Step 4
+   - Verify: `docker exec weblate cat /app/data/ssh/config`
+
+3. **Component has `push_on_commit: True`** ✓
+   - Location: Weblate database (PostgreSQL)
+   - Set by: `auto-setup.sh` Step 6
+   - Verify: Check at https://weblate.local:8080/projects/test-translation/gitlab/
+
+## Auto-Translation
+
+When enabled, translations happen automatically when:
+- New languages are added
+- New strings are pushed to GitLab
+- Source strings are modified
+
+Translations are committed and **automatically pushed back to GitLab** without manual intervention.
 
 ## Files
 

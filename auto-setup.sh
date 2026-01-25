@@ -194,6 +194,8 @@ from weblate.trans.models import Project, Component
 
 project = Project.objects.get(slug='${WEBLATE_PROJECT_SLUG}')
 
+push_on_commit = '${PUSH_ON_COMMIT}'.lower() == 'true'
+
 component, created = Component.objects.get_or_create(
     project=project,
     slug='${WEBLATE_COMPONENT_SLUG}',
@@ -205,7 +207,7 @@ component, created = Component.objects.get_or_create(
         'file_format': '${FILE_FORMAT}',
         'new_base': '${NEW_BASE}',
         'vcs': 'git',
-        'push_on_commit': True,
+        'push_on_commit': push_on_commit,
         'commit_pending_age': 0,
         'manage_units': True,
         'update_linguas': True,
