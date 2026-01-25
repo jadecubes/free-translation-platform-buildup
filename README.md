@@ -24,6 +24,7 @@ Automated setup for Weblate with GitLab integration and Google Translate.
    - `GITLAB_PROJECT_NAMESPACE` - GitLab namespace (e.g., "test")
    - `GITLAB_PROJECT_NAME` - GitLab project name (e.g., "test-translation")
    - `TARGET_LANGUAGES` - Languages to translate to (e.g., "ja,fr,zh_Hant_HK")
+   - `PUSH_ON_COMMIT` - Set to `true` to auto-push translations, `false` for manual review (default: `true`)
 
 4. **Create GitLab project manually:**
    - Open https://gitlab.local:8081/projects/new
@@ -125,6 +126,7 @@ Weblate automatically pushes translations back to GitLab because:
 
 3. **Component has `push_on_commit: True`** ✓
    - Location: Weblate database (PostgreSQL)
+   - Configured by: `PUSH_ON_COMMIT` in `.env` (default: `true`)
    - Set by: `auto-setup.sh` Step 6
    - Verify: Check at https://weblate.local:8080/projects/test-translation/gitlab/
 
@@ -136,6 +138,137 @@ When enabled, translations happen automatically when:
 - Source strings are modified
 
 Translations are committed and **automatically pushed back to GitLab** without manual intervention.
+
+## Switching to Merge Request Mode
+
+If you want Weblate to **create GitLab merge requests** instead of automatically pushing to the main branch, you have several options:
+
+### Option 1: Configure via .env (For Fresh Installations)
+
+Set `PUSH_ON_COMMIT=false` in your `.env` file before running `auto-setup.sh`:
+
+```bash
+PUSH_ON_COMMIT=false
+```
+
+This disables automatic pushing, so translations will be committed locally but not pushed. You can then configure merge request creation via the Weblate UI (see Option 2).
+
+### Option 2: Configure via Weblate UI (Easiest)
+
+1. Open: https://weblate.local:8080/projects/test-translation/gitlab/settings/
+2. Scroll to **"Repository maintenance"** or **"Version control"** section
+3. Find these settings:
+   - **Uncheck** "Push on commit" (disable auto-push)
+   - Set **"Merge style"** to: `GitLab merge request`
+   - Set **"Push branch"**: `weblate-translations` (branch name for MRs)
+4. Scroll to **"GitLab integration"**:
+   - Add your GitLab instance URL: `https://gitlab.local:8081`
+   - Add GitLab API token (generate from GitLab user settings)
+5. Click **Save**
+
+### Option 3: Modify auto-setup.sh Directly (Advanced)
+
+If you need full merge request workflow with automatic MR creation, edit `auto-setup.sh` to add merge request settings:
+
+```python
+push_on_commit = '${PUSH_ON_COMMIT}'.lower() == 'true'
+
+component, created = Component.objects.get_or_create(
+    project=project,
+    slug='${WEBLATE_COMPONENT_SLUG}',
+    defaults={
+        'name': '${WEBLATE_COMPONENT_NAME}',
+        'repo': '${GITLAB_REPO_URL}',
+        'branch': '${GITLAB_BRANCH}',
+        'filemask': '${FILE_MASK}',
+        'file_format': '${FILE_FORMAT}',
+        'new_base': '${NEW_BASE}',
+        'vcs': 'git',
+        'push_on_commit': push_on_commit,  # Controlled by PUSH_ON_COMMIT env var
+        'commit_pending_age': 24,
+        'merge_style': 'gitlab',           # Add this for GitLab merge requests
+        'push_branch': 'weblate-translations',  # Add this for separate branch
+    }
+)
+```
+
+**Workflow after this change:**
+1. Weblate translates strings
+2. Weblate commits to `weblate-translations` branch
+3. Weblate creates a merge request from `weblate-translations` → `main`
+4. You review and manually merge the MR in GitLab
+
+## Allowing Unauthorized Users to View Merge Requests
+
+### Scenario
+
+You have a limited number of GitLab paid user licenses, but you want unauthorized users (reviewers, translators, stakeholders) to view Weblate-generated translation merge requests without consuming licenses.
+
+### Solution: Set GitLab Project to Public Visibility
+
+**Configuration Steps:**
+
+1. Open GitLab project settings: https://gitlab.local:8081/test/test-translation/-/edit
+2. Under **"Visibility, project features, permissions"**:
+   - Set **"Project visibility"** to: `Public`
+   - Enable **"Merge requests"** visibility: `Everyone`
+3. Save changes
+
+**What this achieves:**
+- Anyone can view merge requests without GitLab login
+- No license seats consumed for viewers
+- Write/merge permissions still restricted to project members
+- Weblate continues to push using SSH deploy key
+
+### Workflow with Public Access
+
+```mermaid
+sequenceDiagram
+    participant Dev as 👨‍💻 Developer (Licensed)
+    participant Weblate as 🌍 Weblate
+    participant GitLab as 📦 GitLab (Public Project)
+    participant Reviewer as 👥 Unauthorized Reviewers
+    participant Translator as 🌐 Community Translators
+
+    Dev->>GitLab: Push en-US.json to main
+    Note over Dev,GitLab: Developer has paid license
+
+    Weblate->>GitLab: Pull from main branch
+    Weblate->>Weblate: Auto-translate to target languages
+    Weblate->>GitLab: Push to weblate-translations branch
+    Weblate->>GitLab: Create Merge Request
+
+    Note over GitLab: MR visible to everyone<br/>(Project is Public)
+
+    Reviewer->>GitLab: View MR (no login required)
+    Note over Reviewer: No license consumed<br/>Read-only access
+
+    Translator->>GitLab: View translations (no login)
+    Translator->>GitLab: Add comments (optional login)
+    Note over Translator: Can review without license
+
+    Reviewer->>Dev: Notify via email/Slack
+    Note over Reviewer,Dev: Feedback provided externally
+
+    Dev->>GitLab: Review and merge MR
+    Note over Dev: Only mergers need licenses
+
+    GitLab->>GitLab: Merge to main branch
+    Note over GitLab: Translations deployed
+```
+
+**Key Benefits:**
+- ✅ Unlimited viewers without license costs
+- ✅ Translation files publicly reviewable
+- ✅ Community can provide feedback
+- ✅ Only authorized users can merge
+- ✅ Weblate automation continues to work
+
+**Security Considerations:**
+- Translation files and file structure are publicly visible
+- Repository code/structure is viewable by anyone
+- No one can push/merge without being a project member
+- Suitable for non-sensitive translation content
 
 ## Files
 
