@@ -194,6 +194,9 @@ from weblate.trans.models import Project, Component
 
 project = Project.objects.get(slug='${WEBLATE_PROJECT_SLUG}')
 
+# Convert PUSH_ON_COMMIT env var to Python boolean
+push_on_commit = '${PUSH_ON_COMMIT:-true}'.lower() == 'true'
+
 component, created = Component.objects.get_or_create(
     project=project,
     slug='${WEBLATE_COMPONENT_SLUG}',
@@ -205,7 +208,7 @@ component, created = Component.objects.get_or_create(
         'file_format': '${FILE_FORMAT}',
         'new_base': '${NEW_BASE}',
         'vcs': 'git',
-        'push_on_commit': True,
+        'push_on_commit': push_on_commit,
         'commit_pending_age': 0,
         'manage_units': True,
         'update_linguas': True,
@@ -223,7 +226,7 @@ else:
     component.manage_units = True
     component.update_linguas = True
     component.update_interval = 1
-    component.push_on_commit = True
+    component.push_on_commit = push_on_commit
     component.save()
     component.do_update()
     print('✓ Repository updated and settings configured')

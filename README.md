@@ -52,6 +52,7 @@ Use this for testing and learning. Includes a bundled GitLab instance.
    - `GITLAB_PROJECT_NAMESPACE` - GitLab group (e.g., `test`)
    - `GITLAB_PROJECT_NAME` - Project name (e.g., `test-translation`)
    - `TARGET_LANGUAGES` - Languages to translate (e.g., `ja,fr,zh_Hant_HK`)
+   - `PUSH_ON_COMMIT` - Set to `true` to auto-push translations, `false` for manual review (default: `true`)
 
 3. **Create GitLab project**
    - Open https://gitlab.local:8081
@@ -688,6 +689,8 @@ docker exec gitlab curl -X POST http://webhook-reloader:5000/reload \
 
 ## Architecture
 
+### When `PUSH_ON_COMMIT=true` (default)
+
 ```mermaid
 graph LR
     A[👨‍💻 Developer] -->|1. Edit en-US.json| B[GitLab]
@@ -710,6 +713,35 @@ graph LR
 4. Weblate auto-translates via Google Translate
 5. Weblate commits and pushes translations back to GitLab
 6. All language files available in GitLab
+
+### When `PUSH_ON_COMMIT=false` (manual review)
+
+```mermaid
+graph LR
+    A[👨‍💻 Developer] -->|1. Edit en-US.json| B[GitLab]
+    B -->|2. Webhook| C[Weblate]
+    C -->|3. Pull changes| B
+    C -->|4. Auto-translate| D[Google Translate]
+    D -->|5. Translations| C
+    C -->|6. Commit only| C
+    F[👀 Reviewer] -->|7. Manual push| B
+    B -->|8. Deploy| E[🌐 Application]
+
+    style C fill:#4CAF50
+    style B fill:#FC6D26
+    style D fill:#4285F4
+    style F fill:#FF9800
+```
+
+**Manual review cycle:**
+1. Push source file to GitLab
+2. GitLab webhook notifies Weblate
+3. Weblate pulls changes
+4. Weblate auto-translates via Google Translate
+5. Weblate commits translations locally (not pushed)
+6. Reviewer reviews translations in Weblate UI
+7. Reviewer manually pushes to GitLab
+8. All language files available in GitLab
 
 ## Files
 
@@ -734,6 +766,8 @@ graph LR
 
 ### How They Work Together
 
+#### When `PUSH_ON_COMMIT=true` (default)
+
 ```mermaid
 graph TD
     A[GitLab Push] -->|Webhook POST| B[webhook-reload-service.py]
@@ -750,6 +784,28 @@ graph TD
     style E fill:#2196F3
     style F fill:#FF9800
 ```
+
+#### When `PUSH_ON_COMMIT=false` (manual review)
+
+```mermaid
+graph TD
+    A[GitLab Push] -->|Webhook POST| B[webhook-reload-service.py]
+    B -->|1. docker exec| C[weblate updategit]
+    B -->|2. docker exec| D[weblate loadpo --force]
+    B -->|3. docker exec| E[weblate_auto_translate.py]
+    E -->|Uses| F[Google Translate API]
+    E -->|Writes| G[fr.json, ja.json, zh_Hant_HK.json]
+    B -->|4. docker exec| H[git commit]
+    H -->|Stored locally| K[Weblate VCS]
+    L[👀 Reviewer] -->|Manual: weblate pushgit| J[GitLab Repository]
+
+    style B fill:#4CAF50
+    style E fill:#2196F3
+    style F fill:#FF9800
+    style L fill:#FF5722
+```
+
+**Note:** When `PUSH_ON_COMMIT=false`, translations are committed locally but not pushed. Use `docker exec weblate weblate pushgit test-translation/gitlab` to manually push after review.
 
 ## Quick Reference
 
