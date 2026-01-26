@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-01-26
+
+### 🔧 Simplified Architecture
+
+#### Changed
+- **`webhook-reload-service.py`** - Now uses Weblate's built-in `auto_translate` command directly instead of external Python scripts
+- Workflow is now: pull → loadpo → auto_translate → commit_pending → pushgit
+
+#### Added
+- **Cleanup addon** - Automatically removes obsolete strings from translation files when source strings are deleted
+- Added cleanup addon installation to `auto-setup.sh`
+
+#### Removed
+- **`weblate_auto_translate.py`** - No longer needed; using Weblate's built-in auto_translate command
+- **`update-webhook-image.sh`** - Simplified; users can edit docker-compose.yml directly
+
+#### Fixed
+- Translation files now stay synchronized with source file (obsolete strings are automatically removed)
+
+### 📚 Documentation
+
+#### Updated
+- **`README.md`** - Removed references to deleted files, updated workflow diagrams
+- **`README-DOCKER-HUB.md`** - Updated switching instructions (manual docker-compose.yml edit)
+- **`build-and-push.sh`** - Removed reference to deleted script
+
+---
+
 ## [2.0.0] - 2025-11-28
 
 ### 🎯 Memory Optimization

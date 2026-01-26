@@ -24,24 +24,7 @@ Use this for testing and learning. Includes a bundled GitLab instance.
 
 ### Step-by-Step Setup
 
-1. **Start the containers:**
-   ```bash
-   # Recommended: Use the launcher script (auto-detects CPU architecture)
-   ./start.sh
-
-   # Or manually:
-   docker compose up -d
-   ```
-
-2. **Wait for initialization** (especially GitLab - can take 2-3 minutes)
-   ```bash
-   # Check GitLab status
-   docker logs gitlab
-
-   # GitLab is ready when you see "Reconfigured" messages
-   ```
-
-2. **Configure**
+1. **Configure**
    ```bash
    cp .env.template .env
    nano .env
@@ -49,55 +32,41 @@ Use this for testing and learning. Includes a bundled GitLab instance.
 
    Set these values:
    - `WEBLATE_MT_GOOGLE_KEY` - Your Google Translate API key
-   - `GITLAB_PROJECT_NAMESPACE` - GitLab group (e.g., `test`)
-   - `GITLAB_PROJECT_NAME` - Project name (e.g., `test-translation`)
+   - `GITLAB_PROJECT_NAMESPACE` - GitLab namespace (e.g., `root`)
+   - `GITLAB_PROJECT_NAME` - Project name (e.g., `translate`)
    - `TARGET_LANGUAGES` - Languages to translate (e.g., `ja,fr,zh_Hant_HK`)
    - `PUSH_ON_COMMIT` - Set to `true` to auto-push translations, `false` for manual review (default: `true`)
 
-3. **Create GitLab project**
-   - Open https://gitlab.local:8081
-   - Login: `root` / password from `.env`
-   - Create blank project matching your namespace/name from `.env`
-   - Add initial translation file:
-     ```bash
-     git clone https://gitlab.local:8081/test/test-translation.git
-     cd test-translation
-     echo '{"welcome": "Welcome", "hello": "Hello"}' > en-US.json
-     git add en-US.json
-     git commit -m "Initial translation"
-     git push
-     ```
+2. **Start the containers:**
+   ```bash
+   ./start.sh
+   ```
+   Wait 2-3 minutes for GitLab to initialize.
 
-4. **Run setup**
+3. **Run auto-setup** (creates everything automatically)
    ```bash
    ./auto-setup.sh
    ```
 
+   This script automatically:
+   - Creates GitLab project and initial `en-US.json`
+   - Generates SSH deploy key
+   - Creates Weblate project and component
+   - Configures webhooks and addons
+   - Runs initial translation
+
    **During setup:**
    - Script will pause and ask you to add SSH deploy key to GitLab
-   - Open the displayed file `weblate_ssh_key.pub`
-   - GitLab → Project → Settings → Repository → Deploy Keys → Add key
+   - Open https://gitlab.local:8081 → Project → Settings → Repository → Deploy Keys
+   - Add the key from `weblate_ssh_key.pub`
    - **Check "Grant write permissions"** (required!)
    - Press Enter to continue
 
-5. **Test it works**
-   ```bash
-   cd test-translation
-
-   # Add a new string
-   echo '{"welcome": "Welcome", "hello": "Hello", "thanks": "Thank you"}' > en-US.json
-   git add en-US.json
-   git commit -m "Add thanks"
-   git push
-
-   # Watch the magic happen
-   docker logs -f webhook-reloader
-
-   # After 5-10 seconds, pull translated files
-   git pull
-   cat fr.json  # Should contain "Merci"
-   cat ja.json  # Should contain "ありがとう"
-   ```
+4. **Test it works**
+   - Open https://gitlab.local:8081 and edit `en-US.json` (add a new string)
+   - Commit and push
+   - Watch the magic: `docker logs -f webhook-reloader`
+   - After 5-10 seconds, check GitLab - translations appear in `fr.json`, `ja.json`, etc.
 
 ## 🏭 Production Deployment
 
@@ -215,9 +184,13 @@ Want to build multi-platform images and deploy on any architecture? Follow this 
 
 5. **Use the Hub image:**
    ```bash
-   # Switch to use Docker Hub image instead of local build
-   ./update-webhook-image.sh
-   # Choose option 2: Docker Hub image
+   # Edit docker-compose.yml to use Docker Hub image instead of local build
+   # Change webhook-reloader service from:
+   #   build:
+   #     context: .
+   #     dockerfile: Dockerfile.webhook
+   # To:
+   #   image: your-username/weblate-webhook-reloader:latest
 
    # Restart services
    docker compose down
@@ -240,8 +213,8 @@ cd <your-repo-path>
 cp .env.template .env
 nano .env  # Set DOCKER_HUB_WEBHOOK_REPO
 
-# 2. Switch to Hub image
-./update-webhook-image.sh  # Choose option 2
+# 2. Edit docker-compose.yml to use Hub image
+# Change webhook-reloader from build: to image: your-username/weblate-webhook-reloader:latest
 
 # 3. Start services
 ./start.sh
@@ -593,8 +566,8 @@ docker compose logs -f
 # Check memory
 docker stats
 
-# Manually trigger translation
-docker exec weblate python3 /app/data/weblate_auto_translate.py test-translation gitlab
+# Manually trigger translation for a specific language
+docker exec weblate weblate auto_translate --mode translate --mt google-translate test-translation gitlab ja
 
 # Fix SSH issues
 docker exec weblate bash -c 'ssh-keyscan -p 22 gitlab > /app/data/ssh/known_hosts'
@@ -618,13 +591,10 @@ docker exec gitlab curl -X POST http://webhook-reloader:5000/reload \
 
    Expected response: `{"status": "success", "message": "Units reloaded, auto-translation triggered"}`
 
-4. **Check auto-translate script is available:**
+4. **Test auto-translate manually:**
    ```bash
-   # Verify script exists in Weblate container
-   docker exec weblate ls -la /app/data/weblate_auto_translate.py
-
-   # Test script manually
-   docker exec weblate python3 /app/data/weblate_auto_translate.py test-translation gitlab
+   # Test auto-translate for Japanese
+   docker exec weblate weblate auto_translate --mode translate --mt google-translate test-translation gitlab ja
    ```
 
 5. **Check Google Translate API key:**
@@ -711,8 +681,9 @@ graph LR
 2. GitLab webhook notifies Weblate
 3. Weblate pulls changes
 4. Weblate auto-translates via Google Translate
-5. Weblate commits and pushes translations back to GitLab
-6. All language files available in GitLab
+5. Cleanup addon removes obsolete strings from translation files
+6. Weblate commits and pushes translations back to GitLab
+7. All language files available in GitLab
 
 ### When `PUSH_ON_COMMIT=false` (manual review)
 
@@ -738,31 +709,104 @@ graph LR
 2. GitLab webhook notifies Weblate
 3. Weblate pulls changes
 4. Weblate auto-translates via Google Translate
-5. Weblate commits translations locally (not pushed)
-6. Reviewer reviews translations in Weblate UI
-7. Reviewer manually pushes to GitLab
-8. All language files available in GitLab
+5. Cleanup addon removes obsolete strings from translation files
+6. Weblate commits translations locally (not pushed)
+7. Reviewer reviews translations in Weblate UI
+8. Reviewer manually pushes to GitLab
+9. All language files available in GitLab
 
 ## Files
 
-### Core Files
-- `.env.template` - Configuration template with all required settings
-- `.env` - Your local configuration (generated from template)
-- `auto-setup.sh` - Initial setup script for Weblate project creation
-- `start.sh` - **New!** Launcher with CPU architecture detection and Docker Hub integration
-- `docker-compose.yml` - Docker services configuration (Weblate, GitLab, PostgreSQL, Redis, webhook service)
-- `weblate_ssh_key.pub` - Generated SSH key (add to GitLab as deploy key with write permissions)
+### File Reference Table
 
-### Automatic Translation Workflow Files
-- `webhook-reload-service.py` - **Main webhook orchestrator** that handles GitLab webhooks and coordinates the complete workflow
-- `weblate_auto_translate.py` - **Auto-translation script** that translates strings using Google Translate API and saves to JSON files
-- `Dockerfile.webhook` - Docker image definition for webhook service (Python + Docker CLI + Flask)
+| File | Category | Purpose | Why It Exists |
+|------|----------|---------|---------------|
+| **Configuration** ||||
+| `.env.template` | Config | Template with all environment variables | Provides documented defaults; copy to `.env` to configure |
+| `.env` | Config | Your local configuration (git-ignored) | Stores sensitive data (API keys, passwords) separately from code |
+| `docker-compose.yml` | Config | Defines all Docker services and their connections | Orchestrates 6 services (Weblate, GitLab, PostgreSQL, Redis, Nginx, webhook) as one system |
+| **Scripts** ||||
+| `start.sh` | Script | Launcher with CPU architecture auto-detection | Simplifies startup; detects ARM64/AMD64 and sets correct platform |
+| `auto-setup.sh` | Script | Automated Weblate + GitLab integration setup | Eliminates manual configuration: creates projects, SSH keys, webhooks, addons |
+| `build-and-push.sh` | Script | Builds multi-platform Docker images for Docker Hub | Enables deployment on any architecture (Intel, Apple Silicon, Raspberry Pi) |
+| **Webhook Service** ||||
+| `webhook-reload-service.py` | Python | Flask server that receives GitLab webhooks | Bridges GitLab → Weblate: triggers pull, auto-translate, and push on every commit |
+| `Dockerfile.webhook` | Docker | Builds the webhook-reloader container | Packages Python + Docker CLI + Flask into a minimal container (~200MB) |
+| **Generated** ||||
+| `weblate_ssh_key.pub` | Generated | SSH public key for GitLab deploy key | Allows Weblate to push translations back to GitLab (created by `auto-setup.sh`) |
+| **Documentation** ||||
+| `README.md` | Docs | Main documentation (this file) | Quick start guide and reference |
+| `README-DOCKER-HUB.md` | Docs | Docker Hub setup guide | Instructions for multi-platform image publishing |
+| `README-OPTIMIZATION.md` | Docs | Memory optimization guide | Tuning tips for low-memory environments |
+| `PRODUCTION-SETUP.md` | Docs | Production deployment guide | Instructions for using existing GitLab (not bundled demo) |
+| `CHANGELOG.md` | Docs | Version history | Tracks changes between releases |
+| `OPTIMIZATIONS-SUMMARY.md` | Docs | Optimization overview | Summary of all performance improvements |
 
-### Multi-Platform & Docker Hub Files (New!)
-- `build-and-push.sh` - Build and push multi-platform images to Docker Hub (amd64, arm64, armv7)
-- `update-webhook-image.sh` - Switch between local build and Docker Hub image
-- `README-DOCKER-HUB.md` - Docker Hub setup and deployment guide
-- `README-OPTIMIZATION.md` - Memory optimization and performance tuning guide
+### Why Each Service Exists
+
+| Service | Container | Purpose | Required? |
+|---------|-----------|---------|-----------|
+| `weblate` | weblate | Translation management platform | Yes - core service |
+| `gitlab` | gitlab | Git repository with webhook support | Demo only - use your own GitLab in production |
+| `database` | weblate_postgres | Stores Weblate data (translations, users, settings) | Yes - Weblate requires PostgreSQL |
+| `redis` | weblate_redis | Caching and background task queue | Yes - Weblate requires Redis |
+| `nginx` | weblate_nginx | HTTPS termination and reverse proxy | Yes - provides SSL/TLS |
+| `webhook-reloader` | webhook-reloader | Auto-translation trigger on GitLab push | Yes - enables automatic workflow |
+
+### Setup Sequence
+
+To create the environment from scratch, execute in this order:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Step 1: Configure                                                      │
+│  ─────────────────                                                      │
+│  cp .env.template .env                                                  │
+│  nano .env                    # Set WEBLATE_MT_GOOGLE_KEY, passwords    │
+└─────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Step 2: Start Services                                                 │
+│  ──────────────────────                                                 │
+│  ./start.sh                   # Starts all 6 Docker containers          │
+│                               # Wait 2-3 min for GitLab to initialize   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Step 3: Run Auto-Setup                                                 │
+│  ──────────────────────                                                 │
+│  ./auto-setup.sh              # Automatically:                          │
+│                               #   - Creates GitLab project              │
+│                               #   - Creates en-US.json + language files │
+│                               #   - Generates SSH key                   │
+│                               #   - Creates Weblate project/component   │
+│                               #   - Configures webhooks & addons        │
+│                               #   - Runs initial translation            │
+│                                                                         │
+│  ⚠️  Script will pause - add SSH key to GitLab when prompted            │
+└─────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Step 4: Test                                                           │
+│  ────────────                                                           │
+│  1. Edit en-US.json in GitLab (add a new string)                        │
+│  2. Commit and push                                                     │
+│  3. Wait 5-10 seconds                                                   │
+│  4. Check: translations appear in fr.json, ja.json, etc.                │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Quick Commands:**
+```bash
+# Full setup (copy-paste)
+cp .env.template .env
+nano .env                    # Edit configuration
+./start.sh                   # Start containers (wait 2-3 min)
+./auto-setup.sh              # Creates everything automatically
+```
 
 ### How They Work Together
 
@@ -772,12 +816,12 @@ graph LR
 graph TD
     A[GitLab Push] -->|Webhook POST| B[webhook-reload-service.py]
     B -->|1. docker exec| C[weblate updategit]
-    B -->|2. docker exec| D[weblate loadpo --force]
-    B -->|3. docker exec| E[weblate_auto_translate.py]
+    B -->|2. docker exec| D[weblate loadpo]
+    B -->|3. docker exec| E[weblate auto_translate]
     E -->|Uses| F[Google Translate API]
-    E -->|Writes| G[fr.json, ja.json, zh_Hant_HK.json]
-    B -->|4. docker exec| H[git commit]
-    B -->|5. docker exec| I[git push]
+    E -->|Saves| G[fr.json, ja.json, zh_Hant_HK.json]
+    B -->|4. docker exec| H[weblate commit_pending]
+    B -->|5. docker exec| I[weblate pushgit]
     I -->|SSH Deploy Key| J[GitLab Repository]
 
     style B fill:#4CAF50
@@ -791,11 +835,11 @@ graph TD
 graph TD
     A[GitLab Push] -->|Webhook POST| B[webhook-reload-service.py]
     B -->|1. docker exec| C[weblate updategit]
-    B -->|2. docker exec| D[weblate loadpo --force]
-    B -->|3. docker exec| E[weblate_auto_translate.py]
+    B -->|2. docker exec| D[weblate loadpo]
+    B -->|3. docker exec| E[weblate auto_translate]
     E -->|Uses| F[Google Translate API]
-    E -->|Writes| G[fr.json, ja.json, zh_Hant_HK.json]
-    B -->|4. docker exec| H[git commit]
+    E -->|Saves| G[fr.json, ja.json, zh_Hant_HK.json]
+    B -->|4. docker exec| H[weblate commit_pending]
     H -->|Stored locally| K[Weblate VCS]
     L[👀 Reviewer] -->|Manual: weblate pushgit| J[GitLab Repository]
 
@@ -823,7 +867,6 @@ graph TD
 | **Run setup script** | `./auto-setup.sh` |
 | **Build for Docker Hub** | `./build-and-push.sh` |
 | **Build with version** | `./build-and-push.sh v1.0.0` |
-| **Switch image source** | `./update-webhook-image.sh` |
 
 ### Service URLs
 
@@ -838,8 +881,8 @@ graph TD
 # Execute command in Weblate container
 docker exec weblate <command>
 
-# Test auto-translation manually
-docker exec weblate python3 /app/data/weblate_auto_translate.py test-translation gitlab
+# Test auto-translation manually (for Japanese)
+docker exec weblate weblate auto_translate --mode translate --mt google-translate test-translation gitlab ja
 
 # Check Weblate git status
 docker exec weblate bash -c "cd /app/data/vcs/test-translation/gitlab && git status"

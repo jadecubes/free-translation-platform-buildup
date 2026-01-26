@@ -97,15 +97,21 @@ This will:
 
 ### Method 3: Switch Image Source
 
-Toggle between local build and Docker Hub image:
+To toggle between local build and Docker Hub image, edit `docker-compose.yml`:
 
-```bash
-./update-webhook-image.sh
+**For local build:**
+```yaml
+webhook-reloader:
+  build:
+    context: .
+    dockerfile: Dockerfile.webhook
 ```
 
-Options:
-1. Local build - Build Dockerfile.webhook on your machine
-2. Docker Hub image - Pull pre-built multi-platform image
+**For Docker Hub image:**
+```yaml
+webhook-reloader:
+  image: your-username/weblate-webhook-reloader:latest
+```
 
 ## Workflow Examples
 
@@ -131,8 +137,7 @@ nano .env
 ./build-and-push.sh v1.1.0
 
 # 3. Update docker-compose.yml to use new version
-# Edit manually or:
-./update-webhook-image.sh
+# Change: image: your-username/weblate-webhook-reloader:v1.1.0
 
 # 4. Restart services
 docker compose down
@@ -150,9 +155,8 @@ cd myweblate
 cp .env.template .env
 nano .env  # Set DOCKER_HUB_WEBHOOK_REPO
 
-# 2. Update docker-compose.yml to use Hub image
-./update-webhook-image.sh
-# Choose option 2: Docker Hub image
+# 2. Edit docker-compose.yml to use Hub image
+# Change webhook-reloader from build: to image: your-username/weblate-webhook-reloader:latest
 
 # 3. Start services
 ./start.sh
