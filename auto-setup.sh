@@ -373,70 +373,6 @@ MT_SERVICES = (
 )
 EOF" 2>/dev/null
 log_success "Machine translation settings configured"
-
-# Create auto-translate helper script for webhook-reloader
-docker exec weblate bash -c "cat > /app/data/weblate_auto_translate.py << 'PYEOF'
-#!/usr/bin/env python3
-\"\"\"Auto-translate all target languages using Google Translate.\"\"\"
-import os
-import sys
-import django
-
-os.environ.setdefault(\"DJANGO_SETTINGS_MODULE\", \"weblate.settings\")
-django.setup()
-
-from weblate.trans.models import Component
-
-def auto_translate(project_slug, component_slug):
-    try:
-        component = Component.objects.get(
-            project__slug=project_slug,
-            slug=component_slug
-        )
-    except Component.DoesNotExist:
-        print(f\"Component {project_slug}/{component_slug} not found\")
-        return 1
-
-    # Get source language
-    source = component.source_language.code
-
-    # Translate each target language
-    for translation in component.translation_set.exclude(language__code=source):
-        lang = translation.language.code
-        untranslated = translation.unit_set.filter(state__lt=20).count()
-
-        if untranslated == 0:
-            print(f\"{lang}: already fully translated\")
-            continue
-
-        print(f\"{lang}: translating {untranslated} strings...\")
-
-        # Use Weblate's auto_translate management command
-        from django.core.management import call_command
-        try:
-            call_command(
-                \"auto_translate\",
-                f\"{project_slug}/{component_slug}\",
-                lang,
-                \"--user\", \"admin\",
-                \"--mode\", \"translate\",
-                \"--mt\", \"google-translate\",
-                \"--threshold\", \"80\"
-            )
-            print(f\"{lang}: done\")
-        except Exception as e:
-            print(f\"{lang}: error - {e}\")
-
-    return 0
-
-if __name__ == \"__main__\":
-    if len(sys.argv) != 3:
-        print(\"Usage: weblate_auto_translate.py <project_slug> <component_slug>\")
-        sys.exit(1)
-    sys.exit(auto_translate(sys.argv[1], sys.argv[2]))
-PYEOF"
-docker exec weblate chmod +x /app/data/weblate_auto_translate.py
-log_success "Auto-translate helper script created"
 echo ""
 
 # ========================================
@@ -576,6 +512,14 @@ if [ "$AUTO_TRANSLATE_ENABLED" = "true" ]; then
         "${WEBLATE_PROJECT_SLUG}/${WEBLATE_COMPONENT_SLUG}" 2>/dev/null || log_warning "Addon may already be installed"
 
     log_success "Auto-translation addon enabled"
+
+    # Also add cleanup addon to remove obsolete strings from translation files
+    log_info "  Enabling cleanup addon (removes obsolete translations)..."
+    docker exec weblate weblate install_addon \
+        --addon weblate.cleanup.generic \
+        --configuration "{}" \
+        "${WEBLATE_PROJECT_SLUG}/${WEBLATE_COMPONENT_SLUG}" 2>/dev/null || log_warning "Cleanup addon may already be installed"
+    log_success "Cleanup addon enabled"
 else
     log_info "Step 11: Auto-translation disabled (set AUTO_TRANSLATE_ENABLED=true to enable)"
 fi

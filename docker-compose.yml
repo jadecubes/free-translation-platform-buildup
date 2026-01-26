@@ -162,7 +162,7 @@ services:
         reservations:
           memory: 1.5G
 
-  # Webhook Reload Service for react-i18next
+  # Webhook Reload Service - triggers auto-translation on GitLab push
   webhook-reloader:
     build:
       context: .
@@ -175,6 +175,11 @@ services:
     restart: unless-stopped
     expose:
       - "5000"
+    environment:
+      WEBLATE_PROJECT: ${WEBLATE_PROJECT_SLUG}
+      WEBLATE_COMPONENT: ${WEBLATE_COMPONENT_SLUG}
+      TARGET_LANGUAGES: ${TARGET_LANGUAGES}
+      GITLAB_BRANCH: ${GITLAB_BRANCH}
     deploy:
       resources:
         limits:
