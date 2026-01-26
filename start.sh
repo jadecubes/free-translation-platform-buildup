@@ -170,6 +170,20 @@ if [ -n "$DOCKER_HUB_USERNAME" ] && [ -n "$DOCKER_HUB_TOKEN" ] && [ -n "$DOCKER_
 fi
 
 # ========================================
+# Prepare GitLab SSL Directory (macOS Docker fix)
+# ========================================
+# On macOS, Docker requires the target directory to exist when mounting
+# files into a subdirectory of a volume-mounted path
+if [ -d "./ssl" ] && [ -f "./ssl/gitlab.local.crt" ]; then
+    log_info "Preparing GitLab SSL certificates..."
+    mkdir -p ./gitlab-data/config/ssl
+    cp ./ssl/gitlab.local.crt ./gitlab-data/config/ssl/
+    cp ./ssl/gitlab.local.key ./gitlab-data/config/ssl/
+    log_success "SSL certificates prepared"
+    echo ""
+fi
+
+# ========================================
 # Start Services
 # ========================================
 log_info "Starting Docker Compose services..."
