@@ -75,6 +75,7 @@ services:
       POSTGRES_PORT: 5432
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      WEBLATE_MT_GOOGLE_KEY: ${WEBLATE_MT_GOOGLE_KEY}
       GIT_SSL_NO_VERIFY: "1"
       GIT_SSH_COMMAND: "ssh -F /app/data/ssh/config -o UserKnownHostsFile=/app/data/ssh/known_hosts -o StrictHostKeyChecking=no"
 
@@ -119,9 +120,11 @@ services:
     networks:
       - weblate-network
     environment:
+      # GITLAB_ROOT_PASSWORD must be set outside GITLAB_OMNIBUS_CONFIG
+      # because variable interpolation doesn't work inside YAML multiline strings
+      GITLAB_ROOT_PASSWORD: ${GITLAB_ROOT_PASSWORD}
       GITLAB_OMNIBUS_CONFIG: |
         external_url 'https://gitlab.local:8081'
-        gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD}'
         gitlab_rails['gitlab_shell_ssh_port'] = 2222
 
         # 啟用 HTTPS + 自簽憑證
@@ -134,9 +137,13 @@ services:
         # 同時保留 HTTP 供內網使用
         nginx['custom_gitlab_server_config'] = "listen 80;"
 
-        # macOS Docker compatibility - disable Unix socket for workhorse
+        # macOS Docker compatibility - disable Unix sockets completely
         gitlab_workhorse['listen_network'] = "tcp"
         gitlab_workhorse['listen_addr'] = "127.0.0.1:8181"
+        gitlab_workhorse['auth_backend'] = "http://127.0.0.1:8080"
+        puma['listen'] = "127.0.0.1"
+        puma['port'] = 8080
+        puma['socket'] = ""
 
         # 性能優化設定 - 降低記憶體使用
         puma['worker_processes'] = 1
@@ -155,7 +162,7 @@ services:
         reservations:
           memory: 1.5G
 
-  # Webhook Reload Service for react-i18next
+  # Webhook Reload Service - triggers auto-translation on GitLab push
   webhook-reloader:
     build:
       context: .
@@ -168,6 +175,11 @@ services:
     restart: unless-stopped
     expose:
       - "5000"
+    environment:
+      WEBLATE_PROJECT: ${WEBLATE_PROJECT_SLUG}
+      WEBLATE_COMPONENT: ${WEBLATE_COMPONENT_SLUG}
+      TARGET_LANGUAGES: ${TARGET_LANGUAGES}
+      GITLAB_BRANCH: ${GITLAB_BRANCH}
     deploy:
       resources:
         limits:

@@ -146,8 +146,6 @@ if docker buildx build \
     echo "  webhook-reloader:"
     echo "    image: ${DOCKER_HUB_WEBHOOK_REPO}:latest"
     echo ""
-    log_info "Or run: ./update-webhook-image.sh"
-    echo ""
 else
     log_error "Build failed"
     exit 1
