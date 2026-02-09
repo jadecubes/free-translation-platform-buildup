@@ -1,0 +1,46 @@
+stages:
+  - translate
+
+variables:
+  # Target languages (comma-separated)
+  TARGET_LANGUAGES: "fr,ja,zh-Hant-HK"
+
+translate:
+  stage: translate
+  image: node:20-alpine
+  before_script:
+    # Install git for committing results
+    - apk add --no-cache git
+    # Configure git for commits
+    - git config --global user.email "translator@ci.local"
+    - git config --global user.name "Translation Bot"
+  script:
+    - cd tools/translate
+    - npm install
+    # Set PROJECT_ROOT so translate tool finds locales/ directory
+    - export PROJECT_ROOT=$CI_PROJECT_DIR
+    - npm run translate
+    # Check if there are changes to commit
+    - cd ../..
+    - |
+      if git diff --quiet locales/*.json; then
+        echo "No translation changes detected"
+      else
+        echo "Committing translation updates..."
+        git add locales/*.json
+        git commit -m "chore: update translations
+
+        Auto-translated by Gemini Translation Bot"
+        git push origin HEAD:$CI_COMMIT_REF_NAME
+      fi
+  rules:
+    # Only run when translation source files change
+    - changes:
+        - locales/en-US.json
+        - locales/en-US.context.json
+      when: always
+    # Allow manual trigger
+    - when: manual
+      allow_failure: true
+  environment:
+    name: translation

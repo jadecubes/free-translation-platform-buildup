@@ -1,0 +1,22 @@
+{
+  "submit": "Submit",
+  "cancel": "Cancel",
+  "save": "Save",
+  "delete": "Delete",
+  "welcome": "Welcome to our app",
+  "welcomeUser": "Welcome, {name}!",
+  "errorNetworkTimeout": "Connection timed out. Please try again.",
+  "errorNotFound": "The requested resource was not found.",
+  "itemCount": "{count} items",
+  "itemCountPlural": "{count, plural, one {# item} other {# items}}",
+  "navHome": "Home",
+  "navSettings": "Settings",
+  "navProfile": "Profile",
+  "settingsLanguage": "Language",
+  "settingsTheme": "Theme",
+  "settingsNotifications": "Notifications",
+  "confirmDelete": "Are you sure you want to delete this item?",
+  "loading": "Loading...",
+  "retry": "Retry",
+  "searchPlaceholder": "Search..."
+}

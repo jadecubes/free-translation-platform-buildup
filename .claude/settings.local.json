@@ -50,7 +50,8 @@
       "Bash(echo:*)",
       "Bash(do)",
       "Bash(docker build:*)",
-      "Bash(webhook-reloader)"
+      "Bash(webhook-reloader)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []
