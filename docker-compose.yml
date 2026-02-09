@@ -1,106 +1,7 @@
 version: '3'
 
 services:
-  # PostgreSQL 資料庫
-  database:
-    image: postgres:15-alpine
-    container_name: weblate_postgres
-    env_file:
-      - .env
-    volumes:
-      - ./postgres-data:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - weblate-network
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
-
-  # Redis 快取
-  redis:
-    image: redis:7-alpine
-    container_name: weblate_redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis-data:/data
-    networks:
-      - weblate-network
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-        reservations:
-          memory: 64M
-
-  # Weblate 主服務
-  weblate:
-    image: weblate/weblate:latest
-    container_name: weblate
-    env_file:
-      - .env
-    volumes:
-      - ./weblate-data:/app/data
-    expose:
-      - "8080"
-    restart: unless-stopped
-    depends_on:
-      - database
-      - redis
-    networks:
-      - weblate-network
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-        reservations:
-          memory: 1G
-    environment:
-      WEBLATE_EMAIL_HOST: ${WEBLATE_EMAIL_HOST}
-      WEBLATE_EMAIL_HOST_USER: ${WEBLATE_EMAIL_HOST_USER}
-      WEBLATE_EMAIL_HOST_PASSWORD: ${WEBLATE_EMAIL_HOST_PASSWORD}
-      WEBLATE_SERVER_EMAIL: ${WEBLATE_SERVER_EMAIL}
-      WEBLATE_DEFAULT_FROM_EMAIL: ${WEBLATE_DEFAULT_FROM_EMAIL}
-      WEBLATE_ALLOWED_HOSTS: ${WEBLATE_ALLOWED_HOSTS},weblate.local
-      WEBLATE_ADMIN_PASSWORD: ${WEBLATE_ADMIN_PASSWORD}
-      WEBLATE_ADMIN_EMAIL: ${WEBLATE_ADMIN_EMAIL}
-      WEBLATE_ADMIN_NAME: ${WEBLATE_ADMIN_NAME}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
-      POSTGRES_HOST: database
-      POSTGRES_PORT: 5432
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      GIT_SSL_NO_VERIFY: "1"
-      GIT_SSH_COMMAND: "ssh -F /app/data/ssh/config -o UserKnownHostsFile=/app/data/ssh/known_hosts -o StrictHostKeyChecking=no"
-
-  # Nginx 反向代理 + HTTPS
-  nginx:
-    image: nginx:alpine
-    container_name: weblate_nginx
-    ports:
-      - "8080:443"   # HTTPS 對外
-      - "8082:80"    # HTTP 內部或重導用
-    volumes:
-      - ./nginx/conf/weblate.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - weblate
-    restart: unless-stopped
-    networks:
-      - weblate-network
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-        reservations:
-          memory: 64M
-
-  # GitLab 自架實例
+  # GitLab instance
   gitlab:
     image: gitlab/gitlab-ce:latest
     container_name: gitlab
@@ -117,28 +18,28 @@ services:
       - ./ssl/gitlab.local.crt:/etc/gitlab/ssl/gitlab.local.crt:ro
       - ./ssl/gitlab.local.key:/etc/gitlab/ssl/gitlab.local.key:ro
     networks:
-      - weblate-network
+      - translation-network
     environment:
       GITLAB_OMNIBUS_CONFIG: |
         external_url 'https://gitlab.local:8081'
         gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD}'
         gitlab_rails['gitlab_shell_ssh_port'] = 2222
 
-        # 啟用 HTTPS + 自簽憑證
+        # Enable HTTPS with self-signed certificate
         nginx['listen_port'] = 443
         nginx['listen_https'] = true
         nginx['ssl_certificate'] = '/etc/gitlab/ssl/gitlab.local.crt'
         nginx['ssl_certificate_key'] = '/etc/gitlab/ssl/gitlab.local.key'
         nginx['redirect_http_to_https'] = true
 
-        # 同時保留 HTTP 供內網使用
+        # Keep HTTP for internal use
         nginx['custom_gitlab_server_config'] = "listen 80;"
 
-        # macOS Docker compatibility - disable Unix socket for workhorse
+        # macOS Docker compatibility
         gitlab_workhorse['listen_network'] = "tcp"
         gitlab_workhorse['listen_addr'] = "127.0.0.1:8181"
 
-        # 性能優化設定 - 降低記憶體使用
+        # Performance optimization - reduce memory usage
         puma['worker_processes'] = 1
         puma['worker_timeout'] = 60
         sidekiq['max_concurrency'] = 5
@@ -155,30 +56,25 @@ services:
         reservations:
           memory: 1.5G
 
-  # Webhook Reload Service for react-i18next
-  webhook-reloader:
-    build:
-      context: .
-      dockerfile: Dockerfile.webhook
-    container_name: webhook-reloader
+  # GitLab Runner for CI/CD
+  gitlab-runner:
+    image: gitlab/gitlab-runner:latest
+    container_name: gitlab-runner
+    restart: unless-stopped
     volumes:
+      - ./gitlab-runner-config:/etc/gitlab-runner
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - weblate-network
-    restart: unless-stopped
-    expose:
-      - "5000"
+      - translation-network
+    depends_on:
+      - gitlab
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 512M
         reservations:
-          memory: 32M
+          memory: 128M
 
-# 網路與磁碟區定義
 networks:
-  weblate-network:
+  translation-network:
     driver: bridge
-
-volumes:
-  redis-data:
