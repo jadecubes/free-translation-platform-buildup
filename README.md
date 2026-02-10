@@ -235,44 +235,51 @@ npm run translate
 
 ## Architecture
 
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Page as CI Trigger Page
+    participant CI as GitLab CI
+    participant Repo as GitLab Repo
+    participant LLM as Gemini API
+
+    Dev->>Page: Open trigger page and set context
+    Page->>CI: Trigger translation pipeline
+
+    CI->>CI: Run i18n scanner on codebase
+    CI->>CI: Generate empty translation maps per language
+
+    CI->>Repo: Fetch existing ja.json, zh.json, fr.json
+    Repo-->>CI: Existing translation files
+
+    CI->>CI: Compare and extract untranslated keys
+    CI->>CI: Create to-be-translated file per language
+
+    loop For each language
+        CI->>LLM: Send one language file plus context
+        LLM-->>CI: Translated keys for that language
+        CI->>CI: Fill translations into empty map
+    end
+
+    CI->>CI: Generate diff of filled maps
+
+    CI->>Repo: Create branch with changes
+    CI->>Repo: Create Merge Request with diff
+
+    Repo-->>Dev: MR ready for review
+    Dev->>Repo: Review and merge MR
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Developer Workflow                    │
-└─────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-              Push en-US.json + context
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│                  GitLab (Port 8081)                      │
-│  • Git repository                                        │
-│  • Triggers CI on push                                   │
-└─────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│                   GitLab Runner                          │
-│  • Runs .gitlab-ci.yml                                   │
-│  • Executes translate tool                               │
-└─────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│              TypeScript Translate Tool                   │
-│  1. Read en-US.json + en-US.context.json                │
-│  2. Merge and check for missing contexts                │
-│  3. Call Gemini API with context                        │
-│  4. Write fr.json, ja.json, etc.                        │
-└─────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│                   GitLab Repository                      │
-│  • fr.json, ja.json, zh-Hant-HK.json committed          │
-│  • Ready for application use                            │
-└─────────────────────────────────────────────────────────┘
-```
+
+### Flow Summary
+
+1. **Trigger** - Developer opens CI trigger page and sets project context
+2. **Scan** - CI runs i18n scanner to extract translation keys from codebase
+3. **Generate** - CI creates empty translation maps for each target language
+4. **Compare** - CI fetches existing translations and extracts only untranslated keys
+5. **Translate** - For each language, CI sends untranslated keys to Gemini API
+6. **Fill** - CI fills translated values back into the empty maps
+7. **MR** - CI creates a branch and Merge Request with the diff
+8. **Review** - Developer reviews and merges the MR
 
 ---
 
