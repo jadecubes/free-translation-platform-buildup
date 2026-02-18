@@ -1,16 +1,36 @@
 stages:
+  - deploy
   - translate
 
 variables:
-  # Target languages (comma-separated)
+  # Target languages (comma-separated, overridable via Pipeline Trigger API)
   TARGET_LANGUAGES: "fr,ja,zh-Hant-HK"
 
+# --- GitLab Pages: serves the translation trigger UI ---
+pages:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - mkdir -p public
+    - cp tools/trigger-page/index.html public/index.html
+    - cp locales/en-US.json public/en-US.json
+    - cp locales/en-US.context.json public/en-US.context.json
+  artifacts:
+    paths:
+      - public
+  rules:
+    # Skip pages deployment when pipeline is triggered via API (translate only)
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+      when: never
+    - when: on_success
+
+# --- Translation: triggered by Pipeline Trigger API or manual ---
 translate:
   stage: translate
   image: node:20-alpine
   before_script:
     # Install git for committing results
-    - apk add --no-cache git
+    - apk add --no-cache git curl
     # Configure git for commits
     - git config --global user.email "translator@ci.local"
     - git config --global user.name "Translation Bot"
@@ -26,20 +46,28 @@ translate:
       if git diff --quiet locales/*.json; then
         echo "No translation changes detected"
       else
-        echo "Committing translation updates..."
+        BRANCH_NAME="translate/$(date +%Y%m%d-%H%M%S)"
+        echo "Creating branch $BRANCH_NAME..."
+        git checkout -b "$BRANCH_NAME"
         git add locales/*.json
         git commit -m "chore: update translations
 
         Auto-translated by Gemini Translation Bot"
-        git push origin HEAD:$CI_COMMIT_REF_NAME
+        git push origin "$BRANCH_NAME"
+        echo "Creating Merge Request..."
+        curl --fail --request POST \
+          --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests" \
+          --form "source_branch=$BRANCH_NAME" \
+          --form "target_branch=$CI_COMMIT_REF_NAME" \
+          --form "title=chore: update translations" \
+          --form "remove_source_branch=true"
       fi
   rules:
-    # Only run when translation source files change
-    - changes:
-        - locales/en-US.json
-        - locales/en-US.context.json
-      when: always
-    # Allow manual trigger
+    # Run when triggered via Pipeline Trigger API (from the trigger page)
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+      when: on_success
+    # Allow manual trigger from GitLab CI/CD UI
     - when: manual
       allow_failure: true
   environment:

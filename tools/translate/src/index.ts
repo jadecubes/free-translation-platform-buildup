@@ -40,6 +40,11 @@ async function main() {
     const failed = results.filter((r) => !r.success);
 
     console.log(`Successful: ${successful.length}/${results.length}`);
+    for (const r of successful) {
+      if (r.totalKeys !== undefined) {
+        console.log(`  ${r.language}: ${r.newKeys} new, ${r.existingKeys} existing (${r.totalKeys} total)`);
+      }
+    }
     if (failed.length > 0) {
       console.log("Failed languages:");
       failed.forEach((r) => console.log(`  - ${r.language}: ${r.error}`));

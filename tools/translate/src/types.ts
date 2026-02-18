@@ -25,4 +25,7 @@ export interface TranslationResult {
   translations: TranslationMap;
   success: boolean;
   error?: string;
+  totalKeys?: number;
+  newKeys?: number;
+  existingKeys?: number;
 }

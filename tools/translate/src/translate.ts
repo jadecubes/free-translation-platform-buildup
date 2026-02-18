@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { join, dirname } from "path";
+import { join } from "path";
 import { GeminiTranslator } from "./gemini.js";
 import type {
   TranslationMap,
@@ -56,17 +56,57 @@ export async function translate(
     console.log(`\nTranslating to ${language}...`);
 
     try {
-      const translations = await translator.translate(entries, language);
-
-      // Write output file
+      // Read existing translations for this language
       const outputFile = join(outputDir, `${language}.json`);
-      writeJsonFile(outputFile, translations);
+      let existingMap: TranslationMap = {};
+      if (existsSync(outputFile)) {
+        existingMap = readJsonFile<TranslationMap>(outputFile);
+        console.log(`  Found existing translations: ${Object.keys(existingMap).length} keys`);
+      }
+
+      // Find keys that are new (not in existing translations)
+      const newEntries = entries.filter((e) => !(e.key in existingMap));
+
+      const totalKeys = entries.length;
+      const existingKeys = totalKeys - newEntries.length;
+      const newKeyCount = newEntries.length;
+
+      if (newEntries.length === 0) {
+        console.log(`  No untranslated keys — skipping ${language}`);
+        results.push({
+          language,
+          translations: existingMap,
+          success: true,
+          totalKeys,
+          newKeys: 0,
+          existingKeys,
+        });
+        continue;
+      }
+
+      console.log(`  Translating ${newEntries.length} new key(s) (${existingKeys} existing kept)...`);
+      const newTranslations = await translator.translate(newEntries, language);
+
+      // Merge: existing translations + new translations (new overrides if overlap)
+      const mergedMap: TranslationMap = { ...existingMap, ...newTranslations };
+
+      // Remove keys that no longer exist in source
+      for (const key of Object.keys(mergedMap)) {
+        if (!(key in sourceMap)) {
+          delete mergedMap[key];
+        }
+      }
+
+      writeJsonFile(outputFile, mergedMap);
       console.log(`  Saved: ${outputFile}`);
 
       results.push({
         language,
-        translations,
+        translations: mergedMap,
         success: true,
+        totalKeys,
+        newKeys: newKeyCount,
+        existingKeys,
       });
     } catch (error) {
       const errorMessage =
