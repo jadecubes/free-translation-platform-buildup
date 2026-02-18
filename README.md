@@ -1,1048 +1,454 @@
-# Weblate + GitLab Auto-Translation
+# GitLab + Gemini Auto-Translation
 
-Automatic translation workflow: Push `en-US.json` to GitLab → Auto-translated files appear in 5-10 seconds.
+Automatic context-aware translation: Push `en-US.json` to GitLab, get translated files in seconds.
 
-## What You Get
+## How It Works
 
 ```
-Push en-US.json → GitLab Webhook → Weblate → Google Translate → fr.json, ja.json, etc. → GitLab
+Push en-US.json → GitLab Pages updates trigger UI
+Click "Translate" on trigger page → GitLab CI → Gemini API → Merge Request with fr.json, ja.json, etc.
 ```
 
-**Time:** 5-10 seconds from push to translated files in GitLab.
+**Key features:**
+- Context-aware translations using Gemini AI
+- Static trigger page hosted on GitLab Pages (no separate server)
+- Only translates new/missing keys (cost-efficient)
+- Creates Merge Requests for review before merging
 
 ---
 
-## Demo/Development Setup
+## Quick Start
 
-Use this for testing and learning. Includes a bundled GitLab instance.
-
-### Prerequisites
-- Docker and Docker Compose installed (19.03+ for multi-platform builds)
-- Google Cloud account with Translation API enabled
-- 5.5GB RAM recommended (optimized for low memory usage)
-- Supported CPU architectures: x86_64 (amd64), ARM64, ARMv7
-
-### Step-by-Step Setup
-
-1. **Configure**
-   ```bash
-   cp .env.template .env
-   nano .env
-   ```
-
-   Set these values:
-   - `WEBLATE_MT_GOOGLE_KEY` - Your Google Translate API key
-   - `GITLAB_PROJECT_NAMESPACE` - GitLab namespace (e.g., `root`)
-   - `GITLAB_PROJECT_NAME` - Project name (e.g., `translate`)
-   - `TARGET_LANGUAGES` - Languages to translate (e.g., `ja,fr,zh_Hant_HK`)
-   - `PUSH_ON_COMMIT` - Set to `true` to auto-push translations, `false` for manual review (default: `true`)
-
-2. **Start the containers:**
-   ```bash
-   ./start.sh
-   ```
-   Wait 2-3 minutes for GitLab to initialize.
-
-3. **Run auto-setup** (creates everything automatically)
-   ```bash
-   ./auto-setup.sh
-   ```
-
-   This script automatically:
-   - Creates GitLab project and initial `en-US.json`
-   - Generates SSH deploy key
-   - Creates Weblate project and component
-   - Configures webhooks and addons
-   - Runs initial translation
-
-   **During setup:**
-   - Script will pause and ask you to add SSH deploy key to GitLab
-   - Open https://gitlab.local:8081 → Project → Settings → Repository → Deploy Keys
-   - Add the key from `weblate_ssh_key.pub`
-   - **Check "Grant write permissions"** (required!)
-   - Press Enter to continue
-
-4. **Test it works**
-   - Open https://gitlab.local:8081 and edit `en-US.json` (add a new string)
-   - Commit and push
-   - Watch the magic: `docker logs -f webhook-reloader`
-   - After 5-10 seconds, check GitLab - translations appear in `fr.json`, `ja.json`, etc.
-
-## 🏭 Production Deployment
-
-**Important:** This repository includes a **demo GitLab instance** for testing. For production with your **existing GitLab**, use the production setup guide.
-
-### Current Setup (Demo/Development)
-
-```yaml
-# Includes everything for testing
-services:
-  weblate:      # Translation platform
-  gitlab:       # Bundled GitLab (for demo)
-  postgres:     # Database
-  redis:        # Cache
-  nginx:        # Reverse proxy
-  webhook:      # Auto-translation
-```
-
-**Use this setup for:**
-- ✅ Demo/testing
-- ✅ Learning the integration
-- ✅ Development environment
-- ✅ Self-contained evaluation
-
-### Production Setup (Existing GitLab)
-
-**For production with GitLab.com or your own GitLab server:**
-
-See **`PRODUCTION-SETUP.md`** for complete guide.
-
-**What changes for production:**
-
-```yaml
-# Removes bundled GitLab, connects to yours
-services:
-  weblate:      # Connects to your GitLab
-  postgres:     # Database
-  redis:        # Cache
-  nginx:        # With real SSL
-  webhook:      # Auto-translation
-  # gitlab:     # ❌ Removed (use your existing GitLab)
-```
-
-**Quick production setup:**
+### Step 1. Configure environment
 
 ```bash
-# 1. Use production compose file
-cp docker-compose.yml docker-compose.prod.yml
-
-# 2. Remove GitLab service
-# Edit docker-compose.prod.yml and remove gitlab section
-
-# 3. Configure for your GitLab
-cp .env.template .env.production
-nano .env.production
-# Set:
-# - GITLAB_URL=https://gitlab.com (or your GitLab URL)
-# - GITLAB_REPO_URL=git@gitlab.com:your-org/your-project.git
-# - Real SSL certificates
-# - Production credentials
-
-# 4. Start production services
-docker compose -f docker-compose.prod.yml up -d
-
-# 5. Follow PRODUCTION-SETUP.md for complete steps
-```
-
-**Supported GitLab instances:**
-- ✅ GitLab.com (cloud)
-- ✅ Self-hosted GitLab CE/EE
-- ✅ GitLab Enterprise
-- ✅ Any GitLab version 13+
-
-**See full guide:** [`PRODUCTION-SETUP.md`](PRODUCTION-SETUP.md)
-
-## Docker Hub Setup (Optional)
-
-Want to build multi-platform images and deploy on any architecture? Follow this optional setup.
-
-### Why Use Docker Hub?
-
-- **Build once, run anywhere** - Create images for amd64, ARM64, ARMv7 in one command
-- **Faster deployments** - Pull pre-built images instead of building locally
-- **Cross-platform** - Deploy the same image on Intel servers, Apple Silicon, or Raspberry Pi
-- **Version control** - Tag releases (v1.0.0, v1.1.0, latest)
-
-### Quick Setup (5 minutes)
-
-1. **Create Docker Hub account** (free): https://hub.docker.com/signup
-
-2. **Create access token:**
-   - Go to: https://hub.docker.com/settings/security
-   - Click "New Access Token"
-   - Name: `weblate-webhook`
-   - Permissions: Read, Write, Delete
-   - Click "Generate" and **copy the token**
-
-3. **Configure `.env` file:**
-   ```bash
-   # Add these lines to your .env file:
-   DOCKER_HUB_USERNAME=your-dockerhub-username
-   DOCKER_HUB_TOKEN=dckr_pat_xxxxxxxxxxxxxxxxxxxxx
-   DOCKER_HUB_WEBHOOK_REPO=your-username/weblate-webhook-reloader
-   DOCKER_BUILD_PLATFORMS=linux/amd64,linux/arm64
-   ```
-
-4. **Build and push:**
-   ```bash
-   # Build for multiple platforms and push to Docker Hub
-   ./build-and-push.sh
-
-   # Or with version tag
-   ./build-and-push.sh v1.0.0
-   ```
-
-5. **Use the Hub image:**
-   ```bash
-   # Edit docker-compose.yml to use Docker Hub image instead of local build
-   # Change webhook-reloader service from:
-   #   build:
-   #     context: .
-   #     dockerfile: Dockerfile.webhook
-   # To:
-   #   image: your-username/weblate-webhook-reloader:latest
-
-   # Restart services
-   docker compose down
-   docker compose up -d
-   ```
-
-**Build time:** ~4-6 minutes for amd64 + arm64
-
-For complete guide, see: **`README-DOCKER-HUB.md`**
-
-### Deploy on Different Architecture
-
-Once your image is on Docker Hub, deploy anywhere:
-
-**On your ARM64 server** (e.g., AWS Graviton, Apple Silicon):
-```bash
-# 1. Clone and configure
-git clone <your-repo>
-cd <your-repo-path>
 cp .env.template .env
-nano .env  # Set DOCKER_HUB_WEBHOOK_REPO
-
-# 2. Edit docker-compose.yml to use Hub image
-# Change webhook-reloader from build: to image: your-username/weblate-webhook-reloader:latest
-
-# 3. Start services
-./start.sh
+nano .env  # Set GITLAB_ROOT_PASSWORD and GEMINI_API_KEY
 ```
 
-Docker automatically pulls the correct architecture! No cross-compilation needed.
-
-## Memory Monitoring
-
-After starting services, monitor memory usage:
+### Step 2. Start the Docker containers
 
 ```bash
-# Real-time monitoring
-docker stats
-
-# Check specific container
-docker stats weblate --no-stream
-
-# View all with nice formatting
-docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"
-```
-
-### Expected Memory Usage
-
-| Service | Memory Usage | Limit | Status |
-|---------|-------------|-------|--------|
-| GitLab | 1.5-2GB | 2.5GB | ✅ Optimized |
-| Weblate | 1-1.3GB | 2GB | ✅ Normal |
-| PostgreSQL | 300-500MB | 512MB | ✅ Normal |
-| Redis | 10-50MB | 256MB | ✅ Efficient |
-| Nginx | 10-20MB | 128MB | ✅ Minimal |
-| Webhook | 8-15MB | 128MB | ✅ Minimal |
-| **Total** | **~4-5GB** | **~5.5GB** | ✅ **Optimized** |
-
-### Adjusting Memory Limits
-
-If a service needs more memory, edit `docker-compose.yml`:
-
-```yaml
-services:
-  weblate:
-    deploy:
-      resources:
-        limits:
-          memory: 3G      # Increase from 2G
-        reservations:
-          memory: 1.5G    # Increase from 1G
-```
-
-Then restart:
-```bash
-docker compose down
 docker compose up -d
 ```
 
-See `README-OPTIMIZATION.md` for tuning details.
+Wait 2-3 minutes for GitLab to initialize. You can check progress with `docker logs -f gitlab`.
 
-### Docker Image Optimizations
+### Step 3. Create a project in GitLab
 
-The webhook-reloader image has been optimized for smaller size and faster builds:
+1. Open https://gitlab.local:8081
+2. Login: `root` / your password from `.env`
+3. Create a new project (e.g. `translation-demo`)
 
-#### Optimization Techniques Applied
-
-1. **Minimal Base Image**
-   ```dockerfile
-   FROM python:3.11-slim
-   ```
-   - Uses `slim` variant instead of full Python image
-   - Saves ~300MB compared to standard Python image
-
-2. **No-Cache Pip Install**
-   ```dockerfile
-   RUN pip install --no-cache-dir flask
-   ```
-   - `--no-cache-dir` prevents pip from caching packages
-   - Reduces image size by ~50-100MB
-   - Faster subsequent builds
-
-3. **Cleanup After Installation**
-   ```dockerfile
-   RUN apt-get update && apt-get install -y \
-       ca-certificates curl gnupg \
-       && ... install docker ... \
-       && rm -rf /var/lib/apt/lists/*
-   ```
-   - Removes apt cache after installing packages
-   - Saves ~30-50MB per image
-
-4. **Layer Optimization**
-   - Combined multiple RUN commands to reduce layers
-   - Minimizes image layer count for faster pulls
-
-5. **Multi-Architecture Support**
-   ```dockerfile
-   --platform $BUILDPLATFORM
-   arch=$(dpkg --print-architecture)
-   ```
-   - Automatically selects correct binaries for target architecture
-   - No cross-compilation overhead
-
-#### Image Size Comparison
-
-| Image Version | Size | Notes |
-|--------------|------|-------|
-| **Before optimization** | ~280MB | Standard python:3.11 + pip cache |
-| **After optimization** | ~200MB | Slim base + no-cache + cleanup |
-| **Savings** | **~80MB** | **28% reduction** |
-
-#### Build Time Comparison
-
-| Build Type | First Build | Cached Build | Platforms |
-|-----------|-------------|--------------|-----------|
-| **Local single-platform** | ~2 min | ~30 sec | 1 (native) |
-| **Multi-platform (2)** | ~4-6 min | ~2-3 min | amd64 + arm64 |
-| **Multi-platform (3)** | ~6-10 min | ~3-5 min | amd64 + arm64 + armv7 |
-
-#### Additional Optimizations
-
-**Base Images Used:**
-- `python:3.11-slim` - Webhook service (~200MB)
-- `postgres:15-alpine` - Database (~230MB vs ~380MB standard)
-- `redis:7-alpine` - Cache (~30MB vs ~120MB standard)
-- `nginx:alpine` - Proxy (~40MB vs ~140MB standard)
-
-**Alpine vs Standard:**
-- Alpine Linux is used where possible
-- ~70% smaller than Debian-based images
-- Faster image pulls and container starts
-
-**Total Image Size Savings:**
-```
-PostgreSQL: 380MB → 230MB  (150MB saved)
-Redis:      120MB → 30MB   (90MB saved)
-Nginx:      140MB → 40MB   (100MB saved)
-Webhook:    280MB → 200MB  (80MB saved)
-────────────────────────────────────────
-Total:      920MB → 500MB  (420MB saved, 45% reduction)
-```
-
-### Dockerfile Best Practices Applied
-
-1. ✅ **Use slim/alpine base images** - Smaller footprint
-2. ✅ **Combine RUN commands** - Fewer layers
-3. ✅ **Clean up in same layer** - `rm -rf /var/lib/apt/lists/*`
-4. ✅ **Use --no-cache-dir** - No pip cache stored
-5. ✅ **Multi-stage builds** - Not needed here, but considered
-6. ✅ **Specific versions** - `python:3.11-slim` not `python:latest`
-7. ✅ **Multi-architecture** - Single Dockerfile for all platforms
-
-See `Dockerfile.webhook` for implementation details.
-
-## Multi-Platform Deployment
-
-### Supported Platforms
-
-| Platform | Architecture | Use Cases |
-|----------|-------------|-----------|
-| linux/amd64 | x86_64 | Traditional servers, most VPS, Intel Macs |
-| linux/arm64 | aarch64 | Apple Silicon (M1/M2), AWS Graviton, modern ARM servers |
-| linux/arm/v7 | armv7l | Raspberry Pi 3/4, ARM IoT devices |
-
-### Platform Detection
-
-The `start.sh` script automatically detects your CPU:
+### Step 4. Register the GitLab Runner
 
 ```bash
-./start.sh
+# Get registration token from GitLab Admin > CI/CD > Runners
+docker exec -it gitlab-runner gitlab-runner register
 ```
 
-Output:
+When prompted:
+- **GitLab URL**: `https://gitlab.local:8081`
+- **Registration token**: from the GitLab admin page
+- **Executor**: `docker`
+- **Default image**: `node:20-alpine`
+
+### Step 5. Add the Gemini API key as a CI/CD variable
+
+1. Go to your project > Settings > CI/CD > Variables
+2. Add a new variable:
+   - **Key**: `GEMINI_API_KEY`
+   - **Value**: your Gemini API key
+   - **Protected**: No (so it works on all branches)
+   - **Masked**: Yes
+
+This is required because the CI translate job runs inside an ephemeral container that cannot read the host `.env` file.
+
+### Step 6. Push the project to GitLab
+
+Add translation source files and push to your GitLab project:
+
+**`locales/en-US.json`** - Your translation strings
+```json
+{
+  "submit": "Submit",
+  "cancel": "Cancel",
+  "welcome": "Welcome to our app"
+}
 ```
-[INFO] Detecting CPU architecture...
-[SUCCESS] Detected: ARM64 (Apple Silicon / ARM)
-[INFO] Current platform: linux/arm64
 
-Use this platform? (y/n) [y]:
+**`locales/en-US.context.json`** - Context for better translations
+```json
+{
+  "submit": "Primary action button on forms",
+  "cancel": "Button to close dialogs without saving",
+  "welcome": "Greeting shown on homepage"
+}
 ```
-
-### Manual Platform Override
-
-If auto-detection fails or you want to force a specific platform:
 
 ```bash
-# Set platform manually
-export DOCKER_DEFAULT_PLATFORM=linux/arm64
-
-# Then start normally
-docker compose up -d
+git add .
+git commit -m "Initial commit with translation files"
+git push origin main
 ```
 
-Or choose interactively when prompted by `start.sh`.
+This triggers the `pages` job in CI, which deploys the trigger page to GitLab Pages.
 
-### Building for Specific Platforms
+### Step 7. Create a Pipeline Trigger Token
 
-```bash
-# Build only for amd64
-DOCKER_BUILD_PLATFORMS=linux/amd64 ./build-and-push.sh
+1. Go to your project > Settings > CI/CD > Pipeline triggers
+2. Click **Add trigger** and give it a description (e.g. "Translation trigger page")
+3. Copy the token — you'll need it in the next step
 
-# Build for amd64 + arm64
-DOCKER_BUILD_PLATFORMS=linux/amd64,linux/arm64 ./build-and-push.sh
+### Step 8. Open the trigger page and configure
 
-# Build for all platforms
-DOCKER_BUILD_PLATFORMS=linux/amd64,linux/arm64,linux/arm/v7 ./build-and-push.sh
-```
+1. Open the trigger page at `http://gitlab.local:8084/<group>/<project>` (e.g. `http://gitlab.local:8084/root/translation-demo`)
+2. The **Settings** panel will be expanded on first visit. Fill in:
+   - **GitLab URL**: `https://gitlab.local:8081`
+   - **Project ID**: your project's numeric ID (visible on the project homepage)
+   - **Pipeline Trigger Token**: the token from Step 7
+   - **Ref / Branch**: `main`
+3. Click **Save Settings** (stored in your browser's localStorage)
 
-## Duplicating Setup for Multiple Projects
+### Step 9. Trigger translation
 
-Want to set up automatic translation for another project? Here's how:
+1. Verify the **Source Keys** table shows your `en-US.json` keys
+2. Set **Target Languages** (default: `fr,ja,zh-Hant-HK`)
+3. Click **Translate**
+4. The page shows a link to the triggered pipeline — click it to monitor progress
+5. When the pipeline completes, a **Merge Request** appears in your project with the translated files
+6. Review the MR and merge
 
-### Option 1: Same Weblate Instance, New Project
+### Running a translation after adding new keys
 
-Use the existing Weblate/GitLab containers for a new translation project:
-
-1. **Create new GitLab project:**
-   ```bash
-   # Go to GitLab and create a new project
-   # Example: "my-app-translation"
-   ```
-
-2. **Update .env for new project:**
-   ```bash
-   # Edit .env with new project details
-   nano .env
-   ```
-
-   Update these values:
-   ```bash
-   GITLAB_PROJECT_NAMESPACE=mycompany
-   GITLAB_PROJECT_NAME=my-app-translation
-   GITLAB_REPO_URL=ssh://git@gitlab:22/mycompany/my-app-translation.git
-   WEBLATE_PROJECT_NAME="My App Translation"
-   WEBLATE_PROJECT_SLUG=my-app-translation
-   WEBLATE_COMPONENT_NAME=main
-   WEBLATE_COMPONENT_SLUG=main
-   TARGET_LANGUAGES=ja,fr,de,es  # Customize languages
-   ```
-
-3. **Re-run auto-setup:**
-   ```bash
-   ./auto-setup.sh
-   ```
-
-   The script will:
-   - Reuse the existing SSH key
-   - Create new project in Weblate
-   - Set up webhook for the new GitLab project
-   - Configure auto-translation
-
-4. **Add deploy key to new GitLab project:**
-   - Use the same `weblate_ssh_key.pub`
-   - Add to new project: Settings → Repository → Deploy Keys
-   - Enable write permissions
-
-### Option 2: Completely New Instance
-
-For a separate, isolated translation platform:
-
-1. **Clone the repository to new directory:**
-   ```bash
-   git clone <this-repo> /path/to/new-instance
-   cd /path/to/new-instance
-   ```
-
-2. **Modify docker-compose.yml ports** (to avoid conflicts):
-   ```yaml
-   weblate:
-     ports:
-       - "8090:8080"  # Changed from 8080
-
-   gitlab:
-     ports:
-       - "8091:80"    # Changed from 8081
-       - "2223:22"    # Changed from 2222
-   ```
-
-3. **Create new .env file:**
-   ```bash
-   cp .env.template .env
-   nano .env
-   # Update all values for new instance
-   ```
-
-4. **Start containers and run setup:**
-   ```bash
-   docker compose up -d
-   ./auto-setup.sh
-   ```
-
-### Option 3: Production Setup
-
-For deploying to production with real domain names:
-
-1. **Update .env with production values:**
-   ```bash
-   # Production domains
-   WEBLATE_SITE_DOMAIN=weblate.yourcompany.com
-   WEBLATE_ALLOWED_HOSTS=weblate.yourcompany.com
-   WEBLATE_CSRF_TRUSTED_ORIGINS=https://weblate.yourcompany.com
-
-   # Webhook URL (public HTTPS endpoint)
-   WEBLATE_WEBHOOK_URL=https://weblate.yourcompany.com
-
-   # Production security
-   WEBLATE_DEBUG=0
-   WEBLATE_SECRET_KEY=<generate-random-32-char-key>
-   WEBLATE_ENABLE_HTTPS=1
-
-   # Use production GitLab
-   GITLAB_REPO_URL=git@gitlab.yourcompany.com:yournamespace/yourproject.git
-   ```
-
-2. **Set up SSL/TLS:**
-   - Add reverse proxy (nginx/Caddy) for HTTPS
-   - Configure SSL certificates (Let's Encrypt)
-   - Update webhook URL to HTTPS endpoint
-
-3. **Configure webhook service for production:**
-   ```bash
-   # Update webhook-reload-service.py with production URLs
-   # Update docker-compose.yml with proper networking
-   ```
-
-4. **Run setup:**
-   ```bash
-   docker compose -f docker-compose.prod.yml up -d
-   ./auto-setup.sh
-   ```
-
-**Supported:**
-- ✅ GitLab.com
-- ✅ Self-hosted GitLab CE/EE
-- ✅ GitLab Enterprise
+1. Add new keys to `locales/en-US.json` (and optionally `locales/en-US.context.json`)
+2. Push the changes — the `pages` job updates the trigger page automatically
+3. Open the trigger page — you'll see the updated source keys
+4. Click **Translate** — only the new/missing keys are sent to Gemini (existing translations are preserved)
+5. Review and merge the new MR
 
 ---
 
-## Common Commands
+## Translation Files
+
+### `en-US.json` - Translation Map
+
+Your source strings, typically extracted by i18n tools:
+
+```json
+{
+  "submit": "Submit",
+  "cancel": "Cancel",
+  "errorTimeout": "Connection timed out. Please try again.",
+  "itemCount": "{count} items"
+}
+```
+
+### `en-US.context.json` - Context File
+
+Context helps Gemini make better translation decisions:
+
+```json
+{
+  "submit": "Primary action button on forms",
+  "cancel": "Button to close dialogs without saving",
+  "errorTimeout": "Error message when API fails, tone should be apologetic",
+  "itemCount": "Shows item count in cart, {count} is a placeholder"
+}
+```
+
+**Context is optional** - strings without context still get translated, just with less accuracy.
+
+### Missing Context Warnings
+
+When CI detects keys without context, it logs warnings:
+
+```
+--- Missing Context Warning ---
+The following 2 keys have no context:
+  - newKey
+  - anotherKey
+Add context to en-US.context.json for better translation quality.
+```
+
+Translation still proceeds (soft mode).
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `GEMINI_API_KEY` | Your Gemini API key | Yes |
+| `TARGET_LANGUAGES` | Languages to translate to (e.g., `fr,ja,zh-Hant-HK`) | Yes |
+| `GITLAB_ROOT_PASSWORD` | GitLab root password | Yes |
+
+### Getting a Gemini API Key
+
+1. Go to https://aistudio.google.com/app/apikey
+2. Create a new API key
+3. Add to `.env` file
+
+---
+
+## Project Structure
+
+```
+.
+├── docker-compose.yml      # GitLab + GitLab Runner
+├── .env.template           # Configuration template
+├── .gitlab-ci.yml          # CI pipeline for translation
+├── setup.sh                # Initial setup script
+├── locales/
+│   ├── en-US.json          # Source translation strings
+│   ├── en-US.context.json  # Context for better translations
+│   ├── fr.json             # Generated: French translations
+│   ├── ja.json             # Generated: Japanese translations
+│   └── zh-Hant-HK.json     # Generated: Chinese (Traditional) translations
+└── tools/
+    ├── translate/          # TypeScript translation tool
+    │   ├── package.json
+    │   ├── tsconfig.json
+    │   └── src/
+    │       ├── index.ts    # Entry point
+    │       ├── translate.ts # Core logic
+    │       ├── gemini.ts   # Gemini API wrapper
+    │       └── types.ts    # TypeScript types
+    └── trigger-page/       # Static UI served by GitLab Pages
+        └── index.html      # Trigger page (settings + source keys + pipeline trigger)
+```
+
+### File Descriptions
+
+| File | Function |
+|------|----------|
+| `docker-compose.yml` | Defines the Docker services: GitLab CE (git hosting + CI engine) and GitLab Runner (executes CI jobs) |
+| `.env.template` | Template for environment variables: `GITLAB_ROOT_PASSWORD`, `GEMINI_API_KEY`, `TARGET_LANGUAGES` |
+| `.gitlab-ci.yml` | CI pipeline definition — `pages` job deploys trigger UI to GitLab Pages, `translate` job runs the translation tool and creates a Merge Request |
+| `setup.sh` | One-time setup script: copies `.env.template`, validates API key, starts Docker containers |
+| `locales/en-US.json` | Source English strings (key-value map) — the single source of truth for all translations |
+| `locales/en-US.context.json` | Context descriptions for each key — helps Gemini choose accurate translations |
+| `locales/{lang}.json` | Generated translation files (e.g. `fr.json`, `ja.json`) — output of the translation pipeline |
+| `tools/translate/src/index.ts` | CLI entry point — reads environment variables, resolves file paths, calls `translate()`, prints summary |
+| `tools/translate/src/translate.ts` | Core translation orchestrator — reads source and existing translations, compares keys, sends only new/missing keys to Gemini, merges results, writes output files |
+| `tools/translate/src/gemini.ts` | Gemini API wrapper — builds translation prompts with key/value/context, calls `generateContent()`, parses JSON response |
+| `tools/translate/src/types.ts` | TypeScript type definitions: `TranslationMap`, `ContextMap`, `MergedEntry`, `TranslateOptions`, `TranslationResult` |
+| `tools/trigger-page/index.html` | Static single-page web UI hosted by GitLab Pages — displays source keys, stores GitLab connection settings in localStorage, triggers translation pipeline via Pipeline Trigger API |
+
+---
+
+## Commands
 
 ```bash
-# Start
-./start.sh
+# Start GitLab
+docker compose up -d
 
-# Stop
+# Stop GitLab
 docker compose down
 
-# View logs
-docker logs -f webhook-reloader
-docker compose logs -f
+# View GitLab logs
+docker logs -f gitlab
 
-# Check memory
-docker stats
+# View Runner logs
+docker logs -f gitlab-runner
 
-# Manually trigger translation for a specific language
-docker exec weblate weblate auto_translate --mode translate --mt google-translate test-translation gitlab ja
-
-# Fix SSH issues
-docker exec weblate bash -c 'ssh-keyscan -p 22 gitlab > /app/data/ssh/known_hosts'
+# Run translation locally (for testing)
+cd tools/translate
+npm install
+GEMINI_API_KEY=your_key TARGET_LANGUAGES=fr,ja npm run translate
 ```
+
+---
+
+## Memory Usage
+
+| Service | Memory | Notes |
+|---------|--------|-------|
+| GitLab | ~1.5-2GB | Main service |
+| GitLab Runner | ~128MB | Runs CI jobs |
+| **Total** | **~2GB** | Much lighter than before |
 
 ---
 
 ## Troubleshooting
 
-### Webhook not triggering
+### GitLab not starting
 
 ```bash
-# Check webhook is running
-docker logs -f webhook-reloader
-
-# Test manually
-docker exec gitlab curl -X POST http://webhook-reloader:5000/reload \
-  -H "Content-Type: application/json" \
-  -d '{"ref":"refs/heads/main"}'
+docker logs gitlab
+# Wait for "Reconfigured" messages (2-3 minutes)
 ```
 
-   Expected response: `{"status": "success", "message": "Units reloaded, auto-translation triggered"}`
-
-4. **Test auto-translate manually:**
-   ```bash
-   # Test auto-translate for Japanese
-   docker exec weblate weblate auto_translate --mode translate --mt google-translate test-translation gitlab ja
-   ```
-
-5. **Check Google Translate API key:**
-   ```bash
-   # Verify API key is set in Weblate container
-   docker exec weblate bash -c 'echo $WEBLATE_MT_GOOGLE_KEY'
-   ```
-
-6. **View detailed webhook logs:**
-   ```bash
-   # Follow webhook logs in real-time
-   docker logs -f webhook-reloader
-
-   # Then push a change to GitLab and watch the logs
-   ```
-
-### Translations not appearing in GitLab after auto-translation
-
-1. **Check if translations were created in Weblate:**
-   ```bash
-   # Check translation files in Weblate's VCS directory
-   docker exec weblate cat /app/data/vcs/test-translation/gitlab/fr.json
-   docker exec weblate cat /app/data/vcs/test-translation/gitlab/ja.json
-   ```
-
-2. **Check git status in Weblate:**
-   ```bash
-   docker exec weblate bash -c "cd /app/data/vcs/test-translation/gitlab && git status"
-   docker exec weblate bash -c "cd /app/data/vcs/test-translation/gitlab && git log --oneline -5"
-   ```
-
-3. **Manually push if needed:**
-   ```bash
-   docker exec weblate bash -c "cd /app/data/vcs/test-translation/gitlab && git push origin main"
-   ```
-
-### Weblate not updating when I push to GitLab (Legacy)
-
-1. **Check SSH known_hosts:**
-   ```bash
-   # If you see "Host key verification failed", run:
-   docker exec weblate bash -c 'ssh-keyscan -p 22 gitlab > /app/data/ssh/known_hosts 2>/dev/null && chmod 600 /app/data/ssh/known_hosts'
-   ```
-
-2. **Test git pull manually:**
-   ```bash
-   # Trigger manual update
-   docker exec weblate weblate updategit test-translation/gitlab
-   ```
-
-### GitLab not receiving Weblate translations
-
-1. **Verify deploy key has write permissions:**
-   - Go to: `https://gitlab.local:8081/test/test-translation/-/settings/repository`
-   - Check "Deploy Keys" section
-   - Ensure "Write access enabled" is checked
-
-2. **Check SSH configuration:**
-   ```bash
-   docker exec weblate cat /app/data/ssh/config
-   ```
-
-## Architecture
-
-### When `PUSH_ON_COMMIT=true` (default)
-
-```mermaid
-graph LR
-    A[👨‍💻 Developer] -->|1. Edit en-US.json| B[GitLab]
-    B -->|2. Webhook| C[Weblate]
-    C -->|3. Pull changes| B
-    C -->|4. Auto-translate| D[Google Translate]
-    D -->|5. Translations| C
-    C -->|6. Auto-commit & push| B
-    B -->|7. Deploy| E[🌐 Application]
-
-    style C fill:#4CAF50
-    style B fill:#FC6D26
-    style D fill:#4285F4
-```
-
-**Complete automatic cycle:**
-1. Push source file to GitLab
-2. GitLab webhook notifies Weblate
-3. Weblate pulls changes
-4. Weblate auto-translates via Google Translate
-5. Cleanup addon removes obsolete strings from translation files
-6. Weblate commits and pushes translations back to GitLab
-7. All language files available in GitLab
-
-### When `PUSH_ON_COMMIT=false` (manual review)
-
-```mermaid
-graph LR
-    A[👨‍💻 Developer] -->|1. Edit en-US.json| B[GitLab]
-    B -->|2. Webhook| C[Weblate]
-    C -->|3. Pull changes| B
-    C -->|4. Auto-translate| D[Google Translate]
-    D -->|5. Translations| C
-    C -->|6. Commit only| C
-    F[👀 Reviewer] -->|7. Manual push| B
-    B -->|8. Deploy| E[🌐 Application]
-
-    style C fill:#4CAF50
-    style B fill:#FC6D26
-    style D fill:#4285F4
-    style F fill:#FF9800
-```
-
-**Manual review cycle:**
-1. Push source file to GitLab
-2. GitLab webhook notifies Weblate
-3. Weblate pulls changes
-4. Weblate auto-translates via Google Translate
-5. Cleanup addon removes obsolete strings from translation files
-6. Weblate commits translations locally (not pushed)
-7. Reviewer reviews translations in Weblate UI
-8. Reviewer manually pushes to GitLab
-9. All language files available in GitLab
-
-## Files
-
-### File Reference Table
-
-| File | Category | Purpose | Why It Exists |
-|------|----------|---------|---------------|
-| **Configuration** ||||
-| `.env.template` | Config | Template with all environment variables | Provides documented defaults; copy to `.env` to configure |
-| `.env` | Config | Your local configuration (git-ignored) | Stores sensitive data (API keys, passwords) separately from code |
-| `docker-compose.yml` | Config | Defines all Docker services and their connections | Orchestrates 6 services (Weblate, GitLab, PostgreSQL, Redis, Nginx, webhook) as one system |
-| **Scripts** ||||
-| `start.sh` | Script | Launcher with CPU architecture auto-detection | Simplifies startup; detects ARM64/AMD64 and sets correct platform |
-| `auto-setup.sh` | Script | Automated Weblate + GitLab integration setup | Eliminates manual configuration: creates projects, SSH keys, webhooks, addons |
-| `build-and-push.sh` | Script | Builds multi-platform Docker images for Docker Hub | Enables deployment on any architecture (Intel, Apple Silicon, Raspberry Pi) |
-| **Webhook Service** ||||
-| `webhook-reload-service.py` | Python | Flask server that receives GitLab webhooks | Bridges GitLab → Weblate: triggers pull, auto-translate, and push on every commit |
-| `Dockerfile.webhook` | Docker | Builds the webhook-reloader container | Packages Python + Docker CLI + Flask into a minimal container (~200MB) |
-| **Generated** ||||
-| `weblate_ssh_key.pub` | Generated | SSH public key for GitLab deploy key | Allows Weblate to push translations back to GitLab (created by `auto-setup.sh`) |
-| **Documentation** ||||
-| `README.md` | Docs | Main documentation (this file) | Quick start guide and reference |
-| `README-DOCKER-HUB.md` | Docs | Docker Hub setup guide | Instructions for multi-platform image publishing |
-| `README-OPTIMIZATION.md` | Docs | Memory optimization guide | Tuning tips for low-memory environments |
-| `PRODUCTION-SETUP.md` | Docs | Production deployment guide | Instructions for using existing GitLab (not bundled demo) |
-| `CHANGELOG.md` | Docs | Version history | Tracks changes between releases |
-| `OPTIMIZATIONS-SUMMARY.md` | Docs | Optimization overview | Summary of all performance improvements |
-
-### Why Each Service Exists
-
-| Service | Container | Purpose | Required? |
-|---------|-----------|---------|-----------|
-| `weblate` | weblate | Translation management platform | Yes - core service |
-| `gitlab` | gitlab | Git repository with webhook support | Demo only - use your own GitLab in production |
-| `database` | weblate_postgres | Stores Weblate data (translations, users, settings) | Yes - Weblate requires PostgreSQL |
-| `redis` | weblate_redis | Caching and background task queue | Yes - Weblate requires Redis |
-| `nginx` | weblate_nginx | HTTPS termination and reverse proxy | Yes - provides SSL/TLS |
-| `webhook-reloader` | webhook-reloader | Auto-translation trigger on GitLab push | Yes - enables automatic workflow |
-
-### Setup Sequence
-
-To create the environment from scratch, execute in this order:
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Step 1: Configure                                                      │
-│  ─────────────────                                                      │
-│  cp .env.template .env                                                  │
-│  nano .env                    # Set WEBLATE_MT_GOOGLE_KEY, passwords    │
-└─────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Step 2: Start Services                                                 │
-│  ──────────────────────                                                 │
-│  ./start.sh                   # Starts all 6 Docker containers          │
-│                               # Wait 2-3 min for GitLab to initialize   │
-└─────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Step 3: Run Auto-Setup                                                 │
-│  ──────────────────────                                                 │
-│  ./auto-setup.sh              # Automatically:                          │
-│                               #   - Creates GitLab project              │
-│                               #   - Creates en-US.json + language files │
-│                               #   - Generates SSH key                   │
-│                               #   - Creates Weblate project/component   │
-│                               #   - Configures webhooks & addons        │
-│                               #   - Runs initial translation            │
-│                                                                         │
-│  ⚠️  Script will pause - add SSH key to GitLab when prompted            │
-└─────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Step 4: Test                                                           │
-│  ────────────                                                           │
-│  1. Edit en-US.json in GitLab (add a new string)                        │
-│  2. Commit and push                                                     │
-│  3. Wait 5-10 seconds                                                   │
-│  4. Check: translations appear in fr.json, ja.json, etc.                │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-**Quick Commands:**
-```bash
-# Full setup (copy-paste)
-cp .env.template .env
-nano .env                    # Edit configuration
-./start.sh                   # Start containers (wait 2-3 min)
-./auto-setup.sh              # Creates everything automatically
-```
-
-### How They Work Together
-
-#### When `PUSH_ON_COMMIT=true` (default)
-
-```mermaid
-graph TD
-    A[GitLab Push] -->|Webhook POST| B[webhook-reload-service.py]
-    B -->|1. docker exec| C[weblate updategit]
-    B -->|2. docker exec| D[weblate loadpo]
-    B -->|3. docker exec| E[weblate auto_translate]
-    E -->|Uses| F[Google Translate API]
-    E -->|Saves| G[fr.json, ja.json, zh_Hant_HK.json]
-    B -->|4. docker exec| H[weblate commit_pending]
-    B -->|5. docker exec| I[weblate pushgit]
-    I -->|SSH Deploy Key| J[GitLab Repository]
-
-    style B fill:#4CAF50
-    style E fill:#2196F3
-    style F fill:#FF9800
-```
-
-#### When `PUSH_ON_COMMIT=false` (manual review)
-
-```mermaid
-graph TD
-    A[GitLab Push] -->|Webhook POST| B[webhook-reload-service.py]
-    B -->|1. docker exec| C[weblate updategit]
-    B -->|2. docker exec| D[weblate loadpo]
-    B -->|3. docker exec| E[weblate auto_translate]
-    E -->|Uses| F[Google Translate API]
-    E -->|Saves| G[fr.json, ja.json, zh_Hant_HK.json]
-    B -->|4. docker exec| H[weblate commit_pending]
-    H -->|Stored locally| K[Weblate VCS]
-    L[👀 Reviewer] -->|Manual: weblate pushgit| J[GitLab Repository]
-
-    style B fill:#4CAF50
-    style E fill:#2196F3
-    style F fill:#FF9800
-    style L fill:#FF5722
-```
-
-**Note:** When `PUSH_ON_COMMIT=false`, translations are committed locally but not pushed. Use `docker exec weblate weblate pushgit test-translation/gitlab` to manually push after review.
-
-## Quick Reference
-
-### Common Commands
-
-| Task | Command |
-|------|---------|
-| **Start platform** | `./start.sh` |
-| **Stop all services** | `docker compose down` |
-| **Restart services** | `docker compose restart` |
-| **View all logs** | `docker compose logs -f` |
-| **View webhook logs** | `docker logs -f webhook-reloader` |
-| **View GitLab logs** | `docker logs -f gitlab` |
-| **Check memory usage** | `docker stats` |
-| **Run setup script** | `./auto-setup.sh` |
-| **Build for Docker Hub** | `./build-and-push.sh` |
-| **Build with version** | `./build-and-push.sh v1.0.0` |
-
-### Service URLs
-
-| Service | URL | Default Credentials |
-|---------|-----|-------------------|
-| Weblate | https://weblate.local:8080 | admin / (from .env) |
-| GitLab | https://gitlab.local:8081 | root / (from .env) |
-
-### Useful Docker Commands
+### Runner not picking up jobs
 
 ```bash
-# Execute command in Weblate container
-docker exec weblate <command>
+# Check runner status
+docker exec gitlab-runner gitlab-runner list
 
-# Test auto-translation manually (for Japanese)
-docker exec weblate weblate auto_translate --mode translate --mt google-translate test-translation gitlab ja
-
-# Check Weblate git status
-docker exec weblate bash -c "cd /app/data/vcs/test-translation/gitlab && git status"
-
-# Force pull from GitLab
-docker exec weblate weblate updategit test-translation/gitlab
-
-# Force push to GitLab
-docker exec weblate weblate pushgit test-translation/gitlab
-
-# Commit pending translations
-docker exec weblate weblate commit_pending test-translation/gitlab --age 0
+# Re-register if needed
+docker exec -it gitlab-runner gitlab-runner register
 ```
 
-### Configuration Files
-
-| File | Purpose |
-|------|---------|
-| `.env` | Your configuration (credentials, settings) |
-| `.env.template` | Configuration template |
-| `docker-compose.yml` | Service definitions and memory limits |
-| `weblate_ssh_key.pub` | SSH public key for GitLab |
-
-### Memory Limits Summary
-
-```yaml
-GitLab:      2.5GB limit (1.5GB reserved)  # ~1.5-2GB actual
-Weblate:     2GB limit   (1GB reserved)    # ~1-1.3GB actual
-PostgreSQL:  512MB limit (256MB reserved)  # ~300-500MB actual
-Redis:       256MB limit (64MB reserved)   # ~10-50MB actual
-Nginx:       128MB limit (64MB reserved)   # ~10-20MB actual
-Webhook:     128MB limit (32MB reserved)   # ~8-15MB actual
-─────────────────────────────────────────
-Total:       ~5.5GB limit (~3GB reserved)  # ~4-5GB actual
-```
-
-### Platform Support
+### Translation failing
 
 ```bash
-# Supported architectures
-linux/amd64    # Intel/AMD 64-bit (x86_64)
-linux/arm64    # ARM 64-bit (Apple Silicon, AWS Graviton)
-linux/arm/v7   # ARM 32-bit (Raspberry Pi)
-
-# Check your architecture
-uname -m
-
-# Override platform
-export DOCKER_DEFAULT_PLATFORM=linux/arm64
+# Check CI job logs in GitLab UI
+# Or test locally:
+cd tools/translate
+npm run translate
 ```
-
-### Troubleshooting Quick Fixes
-
-```bash
-# Webhook not working
-docker logs -f webhook-reloader
-docker restart webhook-reloader
-
-# GitLab slow or OOM
-docker stats gitlab
-# Edit docker-compose.yml to increase memory limit
-
-# SSH issues
-docker exec weblate bash -c 'ssh-keyscan -p 22 gitlab > /app/data/ssh/known_hosts'
-
-# Translation not pushing
-docker exec weblate bash -c "cd /app/data/vcs/test-translation/gitlab && git push origin main"
-
-# Reset everything
-docker compose down
-docker compose up -d
-./auto-setup.sh
-```
-
-### Environment Variables Reference
-
-| Variable | Example | Required |
-|----------|---------|----------|
-| `WEBLATE_MT_GOOGLE_KEY` | `AIzaSy...` | ✅ Yes |
-| `GITLAB_PROJECT_NAMESPACE` | `test` | ✅ Yes |
-| `GITLAB_PROJECT_NAME` | `test-translation` | ✅ Yes |
-| `TARGET_LANGUAGES` | `ja,fr,zh_Hant_HK` | ✅ Yes |
-| `DOCKER_HUB_USERNAME` | `your-username` | ⭕ Optional |
-| `DOCKER_HUB_TOKEN` | `dckr_pat_...` | ⭕ Optional |
-| `DOCKER_HUB_WEBHOOK_REPO` | `user/repo` | ⭕ Optional |
-| `DOCKER_BUILD_PLATFORMS` | `linux/amd64,linux/arm64` | ⭕ Optional |
-
-### File Sizes
-
-```bash
-# Docker images (optimized)
-weblate/weblate:latest          ~800MB
-gitlab/gitlab-ce:latest         ~3.5GB
-postgres:15-alpine              ~230MB  (vs ~380MB standard, 39% smaller)
-redis:7-alpine                  ~30MB   (vs ~120MB standard, 75% smaller)
-nginx:alpine                    ~40MB   (vs ~140MB standard, 71% smaller)
-webhook-reloader (custom)       ~200MB  (optimized with --no-cache-dir)
-
-# Image optimization savings
-Alpine images total savings:    ~420MB  (45% reduction)
-Webhook optimization:           ~80MB   (28% reduction)
-
-# Total disk usage (approximately)
-Docker images:                  ~5GB    (optimized, was ~5.5GB)
-GitLab data:                    ~2-3GB
-PostgreSQL data:                ~100-500MB
-Weblate data:                   ~100-300MB
-───────────────────────────────
-Total:                          ~8-10GB (optimized)
-```
-
-### Documentation Index
-
-| Document | Description |
-|----------|-------------|
-| `README.md` | This file - main documentation |
-| `README-DOCKER-HUB.md` | Docker Hub setup and deployment guide |
-| `README-OPTIMIZATION.md` | Memory optimization and tuning guide |
-| `OPTIMIZATIONS-SUMMARY.md` | Complete optimization overview (memory + images) |
-| `PRODUCTION-SETUP.md` | Production deployment with existing GitLab |
-| `CHANGELOG.md` | Version history and changes |
-| `UPGRADE-GUIDE.md` | v1.0 → v2.0 upgrade instructions |
-
-**Configuration Files:**
-- `.env.template` - Configuration template with all settings
-- `.env` - Your active configuration (copy from template)
-
-### Getting Help
-
-1. **Check logs first:**
-   ```bash
-   docker compose logs -f
-   docker logs -f webhook-reloader
-   ```
-
-2. **Review documentation:**
-   - Main guide: `README.md`
-   - Troubleshooting: See "Troubleshooting" section above
-   - Docker Hub: `README-DOCKER-HUB.md`
-   - Memory: `README-OPTIMIZATION.md`
-
-3. **Common issues:**
-   - Memory: Check `docker stats`, see `README-OPTIMIZATION.md`
-   - Webhooks: Check `docker logs webhook-reloader`
-   - Architecture: Use `./start.sh` for auto-detection
-   - Docker Hub: See `README-DOCKER-HUB.md`
-
-### Version Information
-
-- **Current version:** 2.0.0
-- **Release date:** 2025-11-28
-- **Key features:**
-  - ✅ Memory optimization (~30% reduction)
-  - ✅ Multi-architecture support (amd64, arm64, armv7)
-  - ✅ Docker Hub integration
-  - ✅ Automatic CPU detection
-  - ✅ Enhanced launcher script
-
-See `CHANGELOG.md` for complete version history.
 
 ---
 
-**Need more help?** Check the documentation files listed above or review the troubleshooting section.
+## Translation Input Format
+
+The i18n scanner extracts translation keys and their context from your source code into a single JSON file. Each key maps to a `{ value, context }` object — this is what Gemini receives per key to produce context-aware translations:
+
+```json
+{
+  "submit": { "value": "Submit", "context": "Primary action button on forms" },
+  "cancel": { "value": "Cancel", "context": "Button to close dialogs without saving" },
+  "welcome": { "value": "Welcome {userName}", "context": "Greeting shown on homepage" }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `value` | The source English string to translate |
+| `context` | Description of how/where the string is used — helps Gemini pick the right translation |
+
+Context is written by developers in the source code using i18n annotations. The scanner extracts both the string and its context together.
+
+---
+
+## Architecture
+
+### System Diagram
+
+```mermaid
+graph TB
+    subgraph "User"
+        USER["Developer"]
+    end
+
+    subgraph "Docker Network"
+        subgraph "GitLab CE Container"
+            PAGES["Trigger Page<br/>(GitLab Pages)"]
+            GITLAB_REPO["Git Repository<br/>locales/*.json"]
+            GITLAB_API["GitLab API"]
+            GITLAB_CI_ENGINE["CI/CD Engine"]
+        end
+
+        subgraph "GitLab Runner Container"
+            RUNNER["Job Executor"]
+        end
+
+        subgraph "Ephemeral CI Container (node:20-alpine)"
+            direction TB
+            CI_FETCH["Fetch existing translations<br/>fr.json, ja.json, zh.json"]
+            CI_COMPARE["Compare & extract<br/>untranslated keys"]
+            CI_GEMINI_LOOP["For each language:<br/>Send untranslated keys + context"]
+            CI_FILL["Fill translations into maps"]
+            CI_BRANCH["Create branch translate/..."]
+            CI_MR["Create Merge Request"]
+        end
+    end
+
+    GEMINI["Gemini API<br/>gemini-2.0-flash"]
+
+    %% Trigger flow
+    USER -->|"clicks Translate"| PAGES
+    PAGES -->|"POST /trigger/pipeline"| GITLAB_API
+    GITLAB_API -->|"starts pipeline"| GITLAB_CI_ENGINE
+    GITLAB_CI_ENGINE -->|"dispatches job"| RUNNER
+    RUNNER -->|"spins up"| CI_FETCH
+
+    %% CI pipeline flow
+    CI_FETCH -->|"read existing"| GITLAB_REPO
+    GITLAB_REPO -->|"existing translations"| CI_FETCH
+    CI_FETCH --> CI_COMPARE
+    CI_COMPARE --> CI_GEMINI_LOOP
+    CI_GEMINI_LOOP -->|"only new/missing keys"| GEMINI
+    GEMINI -->|"translated JSON"| CI_GEMINI_LOOP
+    CI_GEMINI_LOOP --> CI_FILL
+    CI_FILL --> CI_BRANCH
+    CI_BRANCH -->|"push branch"| GITLAB_REPO
+    CI_BRANCH --> CI_MR
+    CI_MR -->|"POST /merge_requests"| GITLAB_API
+
+    %% Review
+    GITLAB_API -->|"MR ready for review"| USER
+```
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Page as Trigger Page (GitLab Pages)
+    participant API as GitLab API
+    participant CI as GitLab CI
+    participant Repo as GitLab Repo
+    participant LLM as Gemini API
+
+    Dev->>Page: Open trigger page
+    Note over Page: tools/trigger-page/index.html<br/>(served by GitLab Pages)
+    Page->>API: POST /api/v4/projects/:id/trigger/pipeline
+    API->>CI: Start pipeline
+    Note over CI: .gitlab-ci.yml (translate job)
+
+    CI->>Repo: Fetch existing ja.json, zh.json, fr.json
+    Repo-->>CI: Existing translation files
+    Note over Repo: locales/*.json
+
+    CI->>CI: Compare and extract untranslated keys
+    Note over CI: tools/translate/src/translate.ts<br/>mergeSourceAndContext() + filter()
+
+    loop For each language
+        CI->>LLM: Send untranslated keys + context
+        Note over CI,LLM: tools/translate/src/gemini.ts<br/>buildPrompt() → generateContent()
+        LLM-->>CI: Translated keys
+        CI->>CI: Fill translations into map
+    end
+
+    CI->>CI: Merge translations and write files
+    Note over CI: tools/translate/src/translate.ts<br/>writeJsonFile()
+
+    CI->>Repo: Create branch with changes
+    CI->>Repo: Create Merge Request
+    Note over CI,Repo: .gitlab-ci.yml (git + GitLab API)
+
+    Repo-->>Dev: MR ready for review
+    Dev->>Repo: Review and merge MR
+```
+
+### Pipeline Stages
+
+| Stage | Description | File(s) |
+|-------|-------------|---------|
+| **Deploy (Pages)** | On every push, copies `index.html` and source locale files to GitLab Pages. The trigger page is updated automatically. Does not run when pipeline is triggered via API. | `.gitlab-ci.yml` (`pages` job), `tools/trigger-page/index.html` |
+| **Trigger** | Developer clicks the Translate button on the trigger page hosted by GitLab Pages. The page calls the Pipeline Trigger API directly from the browser. This is the only entry point — translation is never auto-triggered by git push, to control Gemini API costs. | `tools/trigger-page/index.html` |
+| **Dispatch** | GitLab CI engine dispatches the translate job to the Runner, which spins up an ephemeral `node:20-alpine` container. | `.gitlab-ci.yml` |
+| **Fetch existing** | For each target language, reads the existing translation file (e.g. `fr.json`) from the repository. Returns `{}` if the file doesn't exist yet. | `tools/translate/src/translate.ts` — `readJsonFile()` |
+| **Compare & extract** | Merges source keys with context, then compares against existing translations. Only keys that are missing from the existing file are marked for translation. | `tools/translate/src/translate.ts` — `mergeSourceAndContext()`, `entries.filter()` |
+| **Translate** | For each language, sends only the untranslated keys (with their values and context) to the Gemini API. Languages with no new keys are skipped entirely. | `tools/translate/src/gemini.ts` — `buildPrompt()`, `translate()` |
+| **Merge & write** | Merges new translations over existing ones (`{ ...existing, ...new }`), removes keys that no longer exist in source, and writes the output file. | `tools/translate/src/translate.ts` — `writeJsonFile()` |
+| **Branch & MR** | Creates a new git branch (`translate/YYYYMMDD-HHMMSS`), commits the changed locale files, pushes the branch, and creates a Merge Request via the GitLab API with `remove_source_branch=true`. | `.gitlab-ci.yml` — git commands + `curl` to GitLab API |
+| **Review** | Developer receives the MR, reviews the translation diff, and merges. | GitLab UI |
+
+---
+
+## Version
+
+**Version:** 4.0.0
+**Changes from 3.x:**
+- Migrated trigger page from standalone Node.js server to GitLab Pages
+- Removed `server.ts` — page calls GitLab Pipeline Trigger API directly
+- Added differential translation (only new/missing keys sent to Gemini)
+- Translation creates Merge Requests instead of direct pushes
+
+---
+
+**Need help?** Check the troubleshooting section or open an issue.
