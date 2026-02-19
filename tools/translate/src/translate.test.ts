@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { parseSourceMap } from "../translate.js";
-import type { SourceMap } from "../types.js";
+import { parseSourceMap } from "./translate.js";
+import type { SourceMap } from "./types.js";
 
 // Shared mock translate function — tests can override per-test via mockResolvedValue
 const mockTranslateFn = vi.fn().mockResolvedValue({
@@ -12,7 +12,7 @@ const mockTranslateFn = vi.fn().mockResolvedValue({
 });
 
 // Mock the gemini module so translate() never calls the real API
-vi.mock("../gemini.js", () => {
+vi.mock("./gemini.js", () => {
   return {
     buildPrompt: vi.fn(),
     parseResponse: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock("../gemini.js", () => {
 });
 
 // Import translate after mock is set up
-const { translate } = await import("../translate.js");
+const { translate } = await import("./translate.js");
 
 function createTempDir(): string {
   return mkdtempSync(join(tmpdir(), "translate-test-"));

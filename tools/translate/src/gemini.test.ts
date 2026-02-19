@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildPrompt, parseResponse } from "../gemini.js";
-import type { MergedEntry } from "../types.js";
+import { buildPrompt, parseResponse } from "./gemini.js";
+import type { MergedEntry } from "./types.js";
 
 describe("parseResponse", () => {
   it("parses clean JSON", () => {

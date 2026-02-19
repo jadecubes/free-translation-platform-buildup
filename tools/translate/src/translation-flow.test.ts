@@ -1,7 +1,7 @@
 /**
  * E2E test: proves the full Gemini translation pipeline works.
  *
- * This imports and runs the ACTUAL translate() function from the project —
+ * This imports and runs the ACTUAL translate() function —
  * the same code path that GitLab CI uses. It verifies:
  *
  * 1. translate() can call the real Gemini API and get valid JSON back
@@ -12,15 +12,13 @@
  * 6. Stale keys are removed from output
  *
  * Requires GEMINI_API_KEY environment variable.
- * Run: cd test && GEMINI_API_KEY=your_key npm test
+ * Run: cd tools/translate && GEMINI_API_KEY=your_key npm test
  */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-
-// Import the REAL translate function and parseSourceMap from the project
-import { translate, parseSourceMap } from "../tools/translate/src/translate.js";
+import { translate } from "./translate.js";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -55,7 +53,6 @@ describe.skipIf(!GEMINI_API_KEY)(
   "Translation Flow (end-to-end with real Gemini API)",
   () => {
     it("translates all keys from source file to French", async () => {
-      // Tests: translate() reads en-US.json, calls Gemini, writes fr.json
       const { dir, sourceFile } = setupTestDir({
         submit: { value: "Submit", context: "Primary action button on forms" },
       });
@@ -67,14 +64,12 @@ describe.skipIf(!GEMINI_API_KEY)(
         geminiApiKey: GEMINI_API_KEY!,
       });
 
-      // translate() should report success
       expect(results).toHaveLength(1);
       expect(results[0].success).toBe(true);
       expect(results[0].language).toBe("fr");
       expect(results[0].newKeys).toBe(1);
       expect(results[0].existingKeys).toBe(0);
 
-      // Output file should exist with a valid French translation
       const output = readOutputFile(dir, "fr");
       expect(output).toHaveProperty("submit");
       expect(typeof output.submit).toBe("string");
@@ -82,7 +77,6 @@ describe.skipIf(!GEMINI_API_KEY)(
     });
 
     it("preserves {name} placeholder through translation", async () => {
-      // Tests: Gemini doesn't mangle placeholders in the translated output
       const { dir, sourceFile } = setupTestDir({
         welcomeUser: {
           value: "Welcome, {name}!",
@@ -105,7 +99,6 @@ describe.skipIf(!GEMINI_API_KEY)(
     });
 
     it("preserves ICU plural format through translation", async () => {
-      // Tests: complex ICU syntax survives the Gemini round-trip
       const { dir, sourceFile } = setupTestDir({
         itemCountPlural: {
           value: "{count, plural, one {# item} other {# items}}",
@@ -129,7 +122,6 @@ describe.skipIf(!GEMINI_API_KEY)(
     });
 
     it("only translates new keys (differential translation)", async () => {
-      // Tests: existing translations are preserved, only missing keys go to Gemini
       const { dir, sourceFile } = setupTestDir(
         {
           submit: {
@@ -142,7 +134,6 @@ describe.skipIf(!GEMINI_API_KEY)(
           },
         },
         {
-          // fr.json already has "submit" translated
           fr: { submit: "Envoyer" },
         }
       );
@@ -155,20 +146,17 @@ describe.skipIf(!GEMINI_API_KEY)(
       });
 
       expect(results[0].success).toBe(true);
-      expect(results[0].newKeys).toBe(1); // only "cancel" is new
-      expect(results[0].existingKeys).toBe(1); // "submit" was kept
+      expect(results[0].newKeys).toBe(1);
+      expect(results[0].existingKeys).toBe(1);
 
       const output = readOutputFile(dir, "fr");
-      // Existing translation preserved exactly
       expect(output.submit).toBe("Envoyer");
-      // New key was translated
       expect(output).toHaveProperty("cancel");
       expect(typeof output.cancel).toBe("string");
       expect(output.cancel.length).toBeGreaterThan(0);
     });
 
     it("removes stale keys no longer in source", async () => {
-      // Tests: keys deleted from en-US.json are removed from translation output
       const { dir, sourceFile } = setupTestDir(
         {
           submit: {
@@ -177,7 +165,6 @@ describe.skipIf(!GEMINI_API_KEY)(
           },
         },
         {
-          // fr.json has "submit" + a stale key "oldFeature" that's not in source anymore
           fr: { submit: "Envoyer", oldFeature: "Ancienne fonctionnalité" },
         }
       );
@@ -197,7 +184,6 @@ describe.skipIf(!GEMINI_API_KEY)(
     });
 
     it("translates to multiple languages in one call", async () => {
-      // Tests: translate() handles multiple target languages sequentially
       const { dir, sourceFile } = setupTestDir({
         submit: { value: "Submit", context: "Primary action button on forms" },
       });
@@ -213,11 +199,9 @@ describe.skipIf(!GEMINI_API_KEY)(
       expect(results[0].success).toBe(true);
       expect(results[1].success).toBe(true);
 
-      // French output
       const fr = readOutputFile(dir, "fr");
       expect(fr).toHaveProperty("submit");
 
-      // Japanese output should contain non-ASCII characters
       const ja = readOutputFile(dir, "ja");
       expect(ja).toHaveProperty("submit");
       expect(ja.submit).toMatch(/[^\x00-\x7F]/);
