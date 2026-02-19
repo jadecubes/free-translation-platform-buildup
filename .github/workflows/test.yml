@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+    paths:
+      - "tools/translate/**"
+      - "tools/trigger-page/**"
+      - "test/**"
+      - ".github/workflows/test.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/translate/**"
+      - "tools/trigger-page/**"
+      - "test/**"
+      - ".github/workflows/test.yml"
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+        working-directory: tools/translate
+      - name: Run unit tests
+        run: npm test
+        working-directory: tools/translate
+
+  e2e-tests:
+    name: E2E Translation Flow
+    runs-on: ubuntu-latest
+    # Only run on PRs to main, and only if GEMINI_API_KEY secret is configured
+    if: ${{ github.event_name == 'pull_request' && secrets.GEMINI_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+        working-directory: test
+      - name: Run e2e tests
+        run: npm test
+        working-directory: test
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

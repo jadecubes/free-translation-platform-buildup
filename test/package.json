@@ -1,0 +1,14 @@
+{
+  "name": "translation-e2e-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "vitest": "^4.0.18",
+    "typescript": "^5.3.0",
+    "@types/node": "^20.10.0"
+  }
+}

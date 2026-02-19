@@ -1,10 +1,25 @@
 stages:
+  - test
   - deploy
   - translate
 
 variables:
   # Target languages (comma-separated, overridable via Pipeline Trigger API)
   TARGET_LANGUAGES: "fr,ja,zh-Hant-HK"
+
+# --- Unit tests: runs on every push ---
+test:
+  stage: test
+  image: node:20-alpine
+  script:
+    - cd tools/translate
+    - npm install
+    - npm test
+  rules:
+    # Skip tests when pipeline is triggered via API (translate only)
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+      when: never
+    - when: on_success
 
 # --- GitLab Pages: serves the translation trigger UI ---
 pages:
@@ -14,7 +29,6 @@ pages:
     - mkdir -p public
     - cp tools/trigger-page/index.html public/index.html
     - cp locales/en-US.json public/en-US.json
-    - cp locales/en-US.context.json public/en-US.context.json
   artifacts:
     paths:
       - public

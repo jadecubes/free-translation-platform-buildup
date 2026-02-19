@@ -281,20 +281,15 @@
       statusEl.className = "status " + type;
     }
 
-    // --- Load source keys (static files co-deployed by GitLab Pages) ---
+    // --- Load source keys (static file co-deployed by GitLab Pages) ---
     async function loadSource() {
       try {
-        const [sourceRes, contextRes] = await Promise.all([
-          fetch("en-US.json"),
-          fetch("en-US.context.json"),
-        ]);
-
-        if (!sourceRes.ok) {
+        const res = await fetch("en-US.json");
+        if (!res.ok) {
           throw new Error("Failed to load en-US.json");
         }
 
-        const source = await sourceRes.json();
-        const context = contextRes.ok ? await contextRes.json() : {};
+        const source = await res.json();
         const keys = Object.keys(source);
         keyCount.textContent = `${keys.length} keys`;
 
@@ -303,8 +298,8 @@
             (k) =>
               `<tr>
                 <td>${esc(k)}</td>
-                <td>${esc(source[k])}</td>
-                <td>${esc(context[k] || "\u2014")}</td>
+                <td>${esc(source[k].value)}</td>
+                <td>${esc(source[k].context || "\u2014")}</td>
               </tr>`
           )
           .join("");
