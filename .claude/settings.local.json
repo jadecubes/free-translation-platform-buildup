@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(GEMINI_API_KEY=\"AIzaSyCZduXjVYZoQav0qili7otUB7q7kqmMh6E\" TARGET_LANGUAGES=\"fr,ja\" PROJECT_ROOT=\"/Users/d/github/free-translation-platform-buildup\" npm run translate)",
+      "Bash(find:*)",
+      "Bash(npm install:*)",
+      "Bash(npm test:*)",
+      "Bash(GEMINI_API_KEY=\"AIzaSyCZduXjVYZoQav0qili7otUB7q7kqmMh6E\" npm test:*)"
+    ]
+  }
+}

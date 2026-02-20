@@ -17,18 +17,15 @@ async function main() {
   const localesDir = resolve(projectRoot, "locales");
 
   const sourceFile = resolve(localesDir, "en-US.json");
-  const contextFile = resolve(localesDir, "en-US.context.json");
 
   console.log("=== Gemini Translation Tool ===\n");
   console.log(`Source file: ${sourceFile}`);
-  console.log(`Context file: ${contextFile}`);
   console.log(`Target languages: ${targetLanguages.join(", ")}`);
   console.log(`Output directory: ${localesDir}\n`);
 
   try {
     const results = await translate({
       sourceFile,
-      contextFile,
       outputDir: localesDir,
       targetLanguages,
       geminiApiKey,

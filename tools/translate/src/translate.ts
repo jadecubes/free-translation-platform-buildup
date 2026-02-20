@@ -2,8 +2,8 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { GeminiTranslator } from "./gemini.js";
 import type {
+  SourceMap,
   TranslationMap,
-  ContextMap,
   MergedEntry,
   TranslateOptions,
   TranslationResult,
@@ -12,28 +12,14 @@ import type {
 export async function translate(
   options: TranslateOptions
 ): Promise<TranslationResult[]> {
-  const { sourceFile, contextFile, outputDir, targetLanguages, geminiApiKey } =
-    options;
+  const { sourceFile, outputDir, targetLanguages, geminiApiKey } = options;
 
-  // Read source translation map
+  // Read source file (combined value + context per key)
   console.log(`Reading source file: ${sourceFile}`);
-  const sourceMap = readJsonFile<TranslationMap>(sourceFile);
+  const sourceMap = readJsonFile<SourceMap>(sourceFile);
 
-  // Read context file (optional)
-  let contextMap: ContextMap = {};
-  if (existsSync(contextFile)) {
-    console.log(`Reading context file: ${contextFile}`);
-    contextMap = readJsonFile<ContextMap>(contextFile);
-  } else {
-    console.warn(`Context file not found: ${contextFile}`);
-    console.warn("Translations will proceed without context (less accurate)");
-  }
-
-  // Merge and detect missing contexts
-  const { entries, missingContextKeys } = mergeSourceAndContext(
-    sourceMap,
-    contextMap
-  );
+  // Parse entries and detect missing contexts
+  const { entries, missingContextKeys } = parseSourceMap(sourceMap);
 
   if (missingContextKeys.length > 0) {
     console.warn("\n--- Missing Context Warning ---");
@@ -42,7 +28,7 @@ export async function translate(
     );
     missingContextKeys.forEach((key) => console.warn(`  - ${key}`));
     console.warn(
-      "Add context to en-US.context.json for better translation quality.\n"
+      "Add context to your i18n annotations for better translation quality.\n"
     );
   }
 
@@ -71,24 +57,18 @@ export async function translate(
       const existingKeys = totalKeys - newEntries.length;
       const newKeyCount = newEntries.length;
 
+      let mergedMap: TranslationMap;
+
       if (newEntries.length === 0) {
-        console.log(`  No untranslated keys — skipping ${language}`);
-        results.push({
-          language,
-          translations: existingMap,
-          success: true,
-          totalKeys,
-          newKeys: 0,
-          existingKeys,
-        });
-        continue;
+        console.log(`  No untranslated keys — skipping translation for ${language}`);
+        mergedMap = { ...existingMap };
+      } else {
+        console.log(`  Translating ${newEntries.length} new key(s) (${existingKeys} existing kept)...`);
+        const newTranslations = await translator.translate(newEntries, language);
+
+        // Merge: existing translations + new translations (new overrides if overlap)
+        mergedMap = { ...existingMap, ...newTranslations };
       }
-
-      console.log(`  Translating ${newEntries.length} new key(s) (${existingKeys} existing kept)...`);
-      const newTranslations = await translator.translate(newEntries, language);
-
-      // Merge: existing translations + new translations (new overrides if overlap)
-      const mergedMap: TranslationMap = { ...existingMap, ...newTranslations };
 
       // Remove keys that no longer exist in source
       for (const key of Object.keys(mergedMap)) {
@@ -134,24 +114,21 @@ function writeJsonFile(filePath: string, data: unknown): void {
   writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
-function mergeSourceAndContext(
-  sourceMap: TranslationMap,
-  contextMap: ContextMap
+export function parseSourceMap(
+  sourceMap: SourceMap
 ): { entries: MergedEntry[]; missingContextKeys: string[] } {
   const entries: MergedEntry[] = [];
   const missingContextKeys: string[] = [];
 
-  for (const [key, value] of Object.entries(sourceMap)) {
-    const context = contextMap[key];
-
-    if (!context) {
+  for (const [key, entry] of Object.entries(sourceMap)) {
+    if (!entry.context) {
       missingContextKeys.push(key);
     }
 
     entries.push({
       key,
-      value,
-      context,
+      value: entry.value,
+      context: entry.context,
     });
   }
 

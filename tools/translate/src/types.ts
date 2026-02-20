@@ -1,8 +1,13 @@
-export interface TranslationMap {
-  [key: string]: string;
+export interface SourceEntry {
+  value: string;
+  context?: string;
 }
 
-export interface ContextMap {
+export interface SourceMap {
+  [key: string]: SourceEntry;
+}
+
+export interface TranslationMap {
   [key: string]: string;
 }
 
@@ -14,7 +19,6 @@ export interface MergedEntry {
 
 export interface TranslateOptions {
   sourceFile: string;
-  contextFile: string;
   outputDir: string;
   targetLanguages: string[];
   geminiApiKey: string;
