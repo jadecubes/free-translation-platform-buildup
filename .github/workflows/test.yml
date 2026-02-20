@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: 20
       - name: Install dependencies
-        run: npm install
+        run: npm ci
         working-directory: tools/translate
       - name: Run unit tests
         run: npm test
@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: 20
       - name: Install dependencies
-        run: npm install
+        run: npm ci
         working-directory: tools/translate
       - name: Run e2e tests
         run: npm run test:e2e
