@@ -20,7 +20,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { translate } from "../src/translate.js";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 function setupTestDir(
   source: Record<string, { value: string; context?: string }>,
@@ -46,7 +46,7 @@ function readOutputFile(dir: string, lang: string): Record<string, string> {
   return JSON.parse(readFileSync(join(dir, `${lang}.json`), "utf-8"));
 }
 
-describe("Translation Flow (end-to-end with real Gemini API)", () => {
+describe.skipIf(!GEMINI_API_KEY)("Translation Flow (end-to-end with real Gemini API)", () => {
   it("translates all keys from source file to French", async () => {
     const { dir, sourceFile } = setupTestDir({
       submit: { value: "Submit", context: "Primary action button on forms" },
@@ -56,7 +56,7 @@ describe("Translation Flow (end-to-end with real Gemini API)", () => {
       sourceFile,
       outputDir: dir,
       targetLanguages: ["fr"],
-      geminiApiKey: GEMINI_API_KEY,
+      geminiApiKey: GEMINI_API_KEY!,
     });
 
     expect(results).toHaveLength(1);
@@ -84,7 +84,7 @@ describe("Translation Flow (end-to-end with real Gemini API)", () => {
       sourceFile,
       outputDir: dir,
       targetLanguages: ["fr"],
-      geminiApiKey: GEMINI_API_KEY,
+      geminiApiKey: GEMINI_API_KEY!,
     });
 
     expect(results[0].success).toBe(true);
@@ -105,7 +105,7 @@ describe("Translation Flow (end-to-end with real Gemini API)", () => {
       sourceFile,
       outputDir: dir,
       targetLanguages: ["fr"],
-      geminiApiKey: GEMINI_API_KEY,
+      geminiApiKey: GEMINI_API_KEY!,
     });
 
     expect(results[0].success).toBe(true);
@@ -137,7 +137,7 @@ describe("Translation Flow (end-to-end with real Gemini API)", () => {
       sourceFile,
       outputDir: dir,
       targetLanguages: ["fr"],
-      geminiApiKey: GEMINI_API_KEY,
+      geminiApiKey: GEMINI_API_KEY!,
     });
 
     expect(results[0].success).toBe(true);
@@ -168,7 +168,7 @@ describe("Translation Flow (end-to-end with real Gemini API)", () => {
       sourceFile,
       outputDir: dir,
       targetLanguages: ["fr"],
-      geminiApiKey: GEMINI_API_KEY,
+      geminiApiKey: GEMINI_API_KEY!,
     });
 
     expect(results[0].success).toBe(true);
@@ -187,7 +187,7 @@ describe("Translation Flow (end-to-end with real Gemini API)", () => {
       sourceFile,
       outputDir: dir,
       targetLanguages: ["fr", "ja"],
-      geminiApiKey: GEMINI_API_KEY,
+      geminiApiKey: GEMINI_API_KEY!,
     });
 
     expect(results).toHaveLength(2);

@@ -28,91 +28,42 @@ cp .env.template .env
 nano .env  # Set GITLAB_ROOT_PASSWORD and GEMINI_API_KEY
 ```
 
-### Step 2. Start the Docker containers
+### Step 2. Start the services
 
 ```bash
-docker compose up -d
+./setup.sh
 ```
 
-Wait 2-3 minutes for GitLab to initialize. You can check progress with `docker logs -f gitlab`.
+This starts GitLab and the runner, then waits until GitLab is ready (2–3 minutes).
 
-### Step 3. Create a project in GitLab
+### Step 3. One-time GitLab setup
 
-1. Open https://gitlab.local:8081
-2. Login: `root` / your password from `.env`
-3. Create a new project (e.g. `translation-demo`)
+Do this once after `setup.sh` reports "GitLab is ready":
 
-### Step 4. Register the GitLab Runner
+1. Open `https://gitlab.local:8081` — login as `root` with your password
+2. Create a new project (e.g. `translation-demo`)
+3. Register the runner: **Admin > CI/CD > Runners**, then:
+   ```bash
+   docker exec -it gitlab-runner gitlab-runner register
+   # URL: https://gitlab.local:8081 | Executor: docker | Image: node:20-alpine
+   ```
+4. Add `GEMINI_API_KEY` as a CI/CD variable: **Project > Settings > CI/CD > Variables** (Protected: No, Masked: Yes)
+5. Push your `locales/en-US.json` to trigger the first `pages` build:
+   ```bash
+   git push origin main
+   ```
+6. Create a Pipeline Trigger Token: **Project > Settings > CI/CD > Pipeline triggers > Add trigger**
 
-```bash
-# Get registration token from GitLab Admin > CI/CD > Runners
-docker exec -it gitlab-runner gitlab-runner register
-```
+### Step 4. Open the trigger page
 
-When prompted:
-- **GitLab URL**: `https://gitlab.local:8081`
-- **Registration token**: from the GitLab admin page
-- **Executor**: `docker`
-- **Default image**: `node:20-alpine`
+1. Open `http://gitlab.local:8084/<group>/<project>`
+2. Fill in Settings (expanded on first visit): GitLab URL, Project ID, Trigger Token, Branch → **Save Settings**
 
-### Step 5. Add the Gemini API key as a CI/CD variable
+### Translate
 
-1. Go to your project > Settings > CI/CD > Variables
-2. Add a new variable:
-   - **Key**: `GEMINI_API_KEY`
-   - **Value**: your Gemini API key
-   - **Protected**: No (so it works on all branches)
-   - **Masked**: Yes
+Open the trigger page → set **Target Languages** → click **Translate**.
 
-This is required because the CI translate job runs inside an ephemeral container that cannot read the host `.env` file.
-
-### Step 6. Generate translation source file and push
-
-Run your project's i18n scanner to extract translation keys and context from the codebase. The scanner generates `locales/en-US.json` — a single file where each key maps to `{ value, context }`:
-
-```bash
-# Run your i18n scanner (project-specific)
-# This generates locales/en-US.json
-
-git add .
-git commit -m "Initial commit with translation files"
-git push origin main
-```
-
-This triggers the `pages` job in CI, which deploys the trigger page to GitLab Pages.
-
-### Step 7. Create a Pipeline Trigger Token
-
-1. Go to your project > Settings > CI/CD > Pipeline triggers
-2. Click **Add trigger** and give it a description (e.g. "Translation trigger page")
-3. Copy the token — you'll need it in the next step
-
-### Step 8. Open the trigger page and configure
-
-1. Open the trigger page at `http://gitlab.local:8084/<group>/<project>` (e.g. `http://gitlab.local:8084/root/translation-demo`)
-2. The **Settings** panel will be expanded on first visit. Fill in:
-   - **GitLab URL**: `https://gitlab.local:8081`
-   - **Project ID**: your project's numeric ID (visible on the project homepage)
-   - **Pipeline Trigger Token**: the token from Step 7
-   - **Ref / Branch**: `main`
-3. Click **Save Settings** (stored in your browser's localStorage)
-
-### Step 9. Trigger translation
-
-1. Verify the **Source Keys** table shows your `en-US.json` keys
-2. Set **Target Languages** (default: `fr,ja,zh-Hant-HK`)
-3. Click **Translate**
-4. The page shows a link to the triggered pipeline — click it to monitor progress
-5. When the pipeline completes, a **Merge Request** appears in your project with the translated files
-6. Review the MR and merge
-
-### Running a translation after adding new keys
-
-1. Re-run the i18n scanner to regenerate `locales/en-US.json` with the new keys
-2. Push the changes — the `pages` job updates the trigger page automatically
-3. Open the trigger page — you'll see the updated source keys
-4. Click **Translate** — only the new/missing keys are sent to Gemini (existing translations are preserved)
-5. Review and merge the new MR
+A Merge Request with the translated files appears when the pipeline completes. Review and merge it.
 
 ---
 
@@ -184,10 +135,6 @@ Translation still proceeds (soft mode).
 ├── setup.sh                # Initial setup script
 ├── .github/workflows/
 │   └── test.yml            # GitHub Actions: runs tests on every push/PR
-├── test/                   # E2E tests (proves Gemini translation flow works)
-│   ├── package.json
-│   ├── vitest.config.ts
-│   └── translation-flow.test.ts
 ├── locales/
 │   ├── en-US.json          # Source strings with context ({ value, context } per key)
 │   ├── fr.json             # Generated: French translations
@@ -197,16 +144,17 @@ Translation still proceeds (soft mode).
     ├── translate/          # TypeScript translation tool
     │   ├── package.json
     │   ├── tsconfig.json
-    │   ├── vitest.config.ts
-    │   └── src/
-    │       ├── index.ts    # Entry point
-    │       ├── translate.ts # Core logic
-    │       ├── gemini.ts   # Gemini API wrapper
-    │       ├── types.ts    # TypeScript types
-    │       └── __tests__/
-    │           ├── gemini.test.ts      # Unit tests for prompt/response parsing
-    │           ├── translate.test.ts   # Unit tests for translation logic
-    │           └── integration.test.ts # Integration test (requires API key)
+    │   ├── vitest.config.ts      # Unit test config (src/**/*.test.ts)
+    │   ├── vitest.e2e.config.ts  # E2E test config (e2e/**/*.test.ts)
+    │   ├── src/
+    │   │   ├── index.ts          # Entry point
+    │   │   ├── translate.ts      # Core logic
+    │   │   ├── gemini.ts         # Gemini API wrapper
+    │   │   ├── types.ts          # TypeScript types
+    │   │   ├── gemini.test.ts    # Unit tests for prompt/response parsing
+    │   │   └── translate.test.ts # Unit tests for translation logic
+    │   └── e2e/
+    │       └── translation-flow.test.ts  # E2E test (requires GEMINI_API_KEY)
     └── trigger-page/       # Static UI served by GitLab Pages
         └── index.html      # Trigger page (settings + source keys + pipeline trigger)
 ```
@@ -225,12 +173,11 @@ Translation still proceeds (soft mode).
 | `tools/translate/src/translate.ts` | Core translation orchestrator — reads source and existing translations, compares keys, sends only new/missing keys to Gemini, merges results, writes output files |
 | `tools/translate/src/gemini.ts` | Gemini API wrapper — builds translation prompts with key/value/context, calls `generateContent()`, parses JSON response |
 | `tools/translate/src/types.ts` | TypeScript type definitions: `SourceEntry`, `SourceMap`, `TranslationMap`, `MergedEntry`, `TranslateOptions`, `TranslationResult` |
-| `tools/translate/src/__tests__/gemini.test.ts` | Unit tests for `buildPrompt()` and `parseResponse()` — verifies prompt construction, JSON parsing, and markdown fence stripping |
-| `tools/translate/src/__tests__/translate.test.ts` | Unit tests for `parseSourceMap()` and `translate()` — verifies differential translation, stale key removal, and merge logic (mocked Gemini) |
-| `tools/translate/src/__tests__/integration.test.ts` | Integration test — calls real Gemini API with minimal payload, skipped when `GEMINI_API_KEY` is not set |
+| `tools/translate/src/gemini.test.ts` | Unit tests for `buildPrompt()` and `parseResponse()` — verifies prompt construction, JSON parsing, and markdown fence stripping |
+| `tools/translate/src/translate.test.ts` | Unit tests for `parseSourceMap()` and `translate()` — verifies differential translation, stale key removal, and merge logic (mocked Gemini) |
+| `tools/translate/e2e/translation-flow.test.ts` | E2E test — calls real Gemini API via the actual `translate()` function; skipped automatically when `GEMINI_API_KEY` is not set |
 | `tools/trigger-page/index.html` | Static single-page web UI hosted by GitLab Pages — displays source keys, stores GitLab connection settings in localStorage, triggers translation pipeline via Pipeline Trigger API |
-| `test/translation-flow.test.ts` | E2E test — proves the full Gemini translation flow works: simple labels, placeholder preservation, ICU plural format, multi-key requests, and file I/O. Requires `GEMINI_API_KEY`. |
-| `.github/workflows/test.yml` | GitHub Actions workflow — runs unit tests on every push/PR, runs e2e tests if `GEMINI_API_KEY` secret is configured |
+| `.github/workflows/test.yml` | GitHub Actions workflow — runs unit tests on every push/PR, runs e2e tests on PRs if `GEMINI_API_KEY` secret is configured |
 
 ---
 
@@ -250,10 +197,10 @@ docker logs -f gitlab
 docker logs -f gitlab-runner
 
 # Run unit tests (no API key needed)
-cd tools/translate && npm install && npm test
+cd tools/translate && npm ci && npm test
 
 # Run e2e tests (proves Gemini flow works, requires API key)
-cd test && npm install && GEMINI_API_KEY=your_key npm test
+cd tools/translate && npm ci && GEMINI_API_KEY=your_key npm run test:e2e
 
 # Run translation locally
 cd tools/translate && npm install
@@ -266,7 +213,7 @@ GEMINI_API_KEY=your_key TARGET_LANGUAGES=fr,ja npm run translate
 
 The project has two levels of tests: **unit tests** (no API key, run fast with mocked Gemini) and **e2e tests** (require API key, call real Gemini API).
 
-### Unit Tests (`tools/translate/src/__tests__/`)
+### Unit Tests (`tools/translate/src/`)
 
 Test the internal logic without calling the Gemini API. Gemini is mocked — these run in ~150ms.
 
@@ -289,7 +236,7 @@ Test the internal logic without calling the Gemini API. Gemini is mocked — the
 | `translate.test.ts` | removes stale keys not in source | `translate()` cleans up keys deleted from `en-US.json` |
 | `translate.test.ts` | handles multiple target languages | `translate()` produces output files for each language |
 
-### E2E Tests (`test/`)
+### E2E Tests (`tools/translate/e2e/`)
 
 Call the **real `translate()` function** with the **real Gemini API**. These prove the actual pipeline works end-to-end. Skipped when `GEMINI_API_KEY` is not set.
 
@@ -306,7 +253,7 @@ Call the **real `translate()` function** with the **real Gemini API**. These pro
 
 ```mermaid
 sequenceDiagram
-    participant Test as test/translation-flow.test.ts
+    participant Test as tools/translate/e2e/translation-flow.test.ts
     participant Translate as tools/translate/src/translate.ts
     participant Gemini as tools/translate/src/gemini.ts
     participant API as Gemini API (real)
@@ -522,7 +469,7 @@ sequenceDiagram
 
 | Stage | Description | File(s) |
 |-------|-------------|---------|
-| **Test** | On every push, runs unit tests for the translation tool (prompt building, response parsing, differential translation logic). Skipped when pipeline is triggered via API. Integration tests are skipped in CI (no API key). | `.gitlab-ci.yml` (`test` job), `tools/translate/src/__tests__/*.test.ts` |
+| **Test** | On every push, runs unit tests for the translation tool (prompt building, response parsing, differential translation logic). Skipped when pipeline is triggered via API. | `.gitlab-ci.yml` (`test` job), `tools/translate/src/*.test.ts` |
 | **Deploy (Pages)** | On every push, copies `index.html` and source locale files to GitLab Pages. The trigger page is updated automatically. Does not run when pipeline is triggered via API. | `.gitlab-ci.yml` (`pages` job), `tools/trigger-page/index.html` |
 | **Trigger** | Developer clicks the Translate button on the trigger page hosted by GitLab Pages. The page calls the Pipeline Trigger API directly from the browser. This is the only entry point — translation is never auto-triggered by git push, to control Gemini API costs. | `tools/trigger-page/index.html` |
 | **Dispatch** | GitLab CI engine dispatches the translate job to the Runner, which spins up an ephemeral `node:20-alpine` container. | `.gitlab-ci.yml` |
