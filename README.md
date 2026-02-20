@@ -177,7 +177,7 @@ Translation still proceeds (soft mode).
 | `tools/translate/src/translate.test.ts` | Unit tests for `parseSourceMap()` and `translate()` — verifies differential translation, stale key removal, and merge logic (mocked Gemini) |
 | `tools/translate/e2e/translation-flow.test.ts` | E2E test — calls real Gemini API via the actual `translate()` function; skipped automatically when `GEMINI_API_KEY` is not set |
 | `tools/trigger-page/index.html` | Static single-page web UI hosted by GitLab Pages — displays source keys, stores GitLab connection settings in localStorage, triggers translation pipeline via Pipeline Trigger API |
-| `.github/workflows/test.yml` | GitHub Actions workflow — runs unit tests on every push/PR, runs e2e tests on PRs if `GEMINI_API_KEY` secret is configured |
+| `.github/workflows/test.yml` | GitHub Actions workflow — runs unit tests on every push/PR to `main` |
 
 ---
 
@@ -238,7 +238,12 @@ Test the internal logic without calling the Gemini API. Gemini is mocked — the
 
 ### E2E Tests (`tools/translate/e2e/`)
 
-Call the **real `translate()` function** with the **real Gemini API**. These prove the actual pipeline works end-to-end. Skipped when `GEMINI_API_KEY` is not set.
+Call the **real `translate()` function** with the **real Gemini API**. These prove the actual pipeline works end-to-end. Not run in CI — run manually when you want to verify the Gemini integration:
+
+```bash
+cd tools/translate
+GEMINI_API_KEY=your_key npm run test:e2e
+```
 
 | Test | What it proves |
 |------|----------------|
@@ -310,12 +315,8 @@ The project includes a GitHub Actions workflow (`.github/workflows/test.yml`) th
 
 **What runs:**
 - **Unit tests** — always run (no API key needed), validates translation logic
-- **E2E tests** — only run if `GEMINI_API_KEY` secret is configured, proves the real Gemini flow works
 
-**To enable e2e tests on GitHub:**
-1. Go to your GitHub repo > Settings > Secrets and variables > Actions
-2. Click **New repository secret**
-3. Name: `GEMINI_API_KEY`, Value: your Gemini API key
+E2E tests are not run in CI. Run them manually — see [E2E Tests](#e2e-tests-toolstranslatee2e) above.
 
 ---
 
