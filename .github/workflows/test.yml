@@ -32,7 +32,9 @@ jobs:
   e2e-tests:
     name: E2E Translation Flow
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && secrets.GEMINI_API_KEY != '' }}
+    if: ${{ github.event_name == 'pull_request' }}
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,7 +44,6 @@ jobs:
         run: npm ci
         working-directory: tools/translate
       - name: Run e2e tests
+        if: ${{ env.GEMINI_API_KEY != '' }}
         run: npm run test:e2e
         working-directory: tools/translate
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
