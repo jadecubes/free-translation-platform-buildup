@@ -1,6 +1,6 @@
 # GitLab + Gemini Auto-Translation
 
-![Unit Tests](https://github.com/jadecubes/free-translation-platform-buildup/actions/workflows/test.yml/badge.svg)
+![Unit Tests](https://github.com/jadecubes/free-translation-platform-buildup/actions/workflows/test.yml/badge.svg?branch=main)
 
 A self-hosted translation platform using GitLab CI and Gemini AI. Trigger context-aware translations from a web UI, review via Merge Requests.
 
