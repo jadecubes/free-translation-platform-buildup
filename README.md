@@ -258,26 +258,29 @@ GEMINI_API_KEY=your_key npm run test:e2e
 
 ```mermaid
 sequenceDiagram
-    participant Test as tools/translate/e2e/translation-flow.test.ts
-    participant Translate as tools/translate/src/translate.ts
-    participant Gemini as tools/translate/src/gemini.ts
+    participant Test as translation-flow.test.ts
+    participant Translate as translate.ts
+    participant Gemini as gemini.ts
     participant API as Gemini API (real)
     participant FS as File System (temp dir)
 
     Note over Test: Setup: create temp dir with en-US.json
 
     Test->>FS: Write en-US.json (source)
-    Test->>FS: Write fr.json (existing translations, if testing differential)
-
     Test->>Translate: translate({ sourceFile, outputDir, targetLanguages, geminiApiKey })
 
     Translate->>FS: Read en-US.json
     Translate->>Translate: parseSourceMap() → extract entries
-    Translate->>FS: Read existing fr.json (if exists)
+
+    opt Testing differential translation
+        Test->>FS: Write {lang}.json (pre-seed some existing translations)
+        Translate->>FS: Read existing {lang}.json
+    end
+
     Translate->>Translate: Compare keys → find new/missing keys
 
     alt New keys found
-        Translate->>Gemini: translator.translate(newEntries, "fr")
+        Translate->>Gemini: translator.translate(newEntries, targetLanguage)
         Gemini->>API: POST generateContent(prompt)
         API-->>Gemini: JSON response
         Gemini->>Gemini: parseResponse() → strip fences, parse JSON
@@ -286,12 +289,11 @@ sequenceDiagram
 
     Translate->>Translate: Merge existing + new translations
     Translate->>Translate: Remove stale keys not in source
-    Translate->>FS: Write fr.json (merged output)
+    Translate->>FS: Write {lang}.json (merged output)
     Translate-->>Test: results[]
 
     Note over Test: Assertions
-
-    Test->>FS: Read fr.json output
+    Test->>FS: Read {lang}.json output
     Test->>Test: Verify success, key count, content
     Test->>Test: Verify placeholders preserved
     Test->>Test: Verify stale keys removed
@@ -347,6 +349,40 @@ docker exec -it gitlab-runner gitlab-runner register
 cd tools/translate
 npm run translate
 ```
+
+---
+
+## Translation Model Comparison
+
+Three Google translation products are available. This project currently uses Gemini generative API.
+
+| | Gemini generative API | Cloud Translation API v3 | Translation LLM (Vertex AI) |
+|---|---|---|---|
+| **What it is** | General-purpose LLM | Older dedicated NMT service | LLM built specifically for translation |
+| **Understands `context` field** | Yes | No | Yes |
+| **Native glossary support** | No — inject via prompt text | Yes — upload CSV/TSV | Yes — upload CSV/TSV |
+| **Translation quality** | High | Medium | Highest |
+| **Speed** | Baseline | Fast | ~3× faster than Gemini flash |
+| **Setup** | Simple (`@google/generative-ai`) | GCP SDK | Vertex AI SDK (GCP billing) |
+| **Best for** | Context-aware UI strings, flexibility | High-volume simple text, strict term enforcement | Production translation with both quality and glossary enforcement |
+| **Currently used** | Yes | No | No |
+
+### Why this project uses Gemini generative API
+
+The `context` field in `en-US.json` is a first-class feature of this platform — it tells the LLM *how* a string is used (e.g. `"context": "Error message when API fails, tone should be apologetic"`). Only LLM-based models understand and act on this context. Cloud Translation API v3 ignores it entirely.
+
+Glossary is handled by injecting the term table into the prompt:
+
+```
+GLOSSARY — always translate these terms exactly as shown, no exceptions:
+{"主食罐": "wet food", "狗狗食品": "dog food"}
+```
+
+### When to consider switching to Translation LLM (Vertex AI)
+
+- Term consistency is critical and prompt-injected glossary proves unreliable in practice
+- You need native glossary enforcement (guaranteed, not best-effort)
+- You are already on GCP / Vertex AI infrastructure
 
 ---
 
@@ -480,6 +516,116 @@ sequenceDiagram
 | **Merge & write** | Merges new translations over existing ones (`{ ...existing, ...new }`), removes keys that no longer exist in source, and writes the output file. | `tools/translate/src/translate.ts` — `writeJsonFile()` |
 | **Branch & MR** | Creates a new git branch (`translate/YYYYMMDD-HHMMSS`), commits the changed locale files, pushes the branch, and creates a Merge Request via the GitLab API with `remove_source_branch=true`. | `.gitlab-ci.yml` — git commands + `curl` to GitLab API |
 | **Review** | Developer receives the MR, reviews the translation diff, and merges. | GitLab UI |
+
+---
+
+## Optional Extensions
+
+The following features are **not part of the core platform** — the basic translation pipeline works without them. They are worth adding if your product has domain-specific vocabulary or high translation volume.
+
+### Glossary
+
+A glossary is a controlled list of domain-specific terms with their approved translations per language. Instead of letting the LLM freely choose how to translate a term, the glossary enforces a consistent mapping every time that term appears.
+
+**Example `glossary.json`** (not a file in this repo — you create it if needed):
+
+```json
+{
+  "主食罐":   { "en-US": "wet food",   "fr": "nourriture humide",     "ja": "主食缶" },
+  "狗狗食品": { "en-US": "dog food",   "fr": "nourriture pour chien", "ja": "ドッグフード" },
+  "貓咪罐頭": { "en-US": "canned cat food", "fr": "boîte pour chat",  "ja": "猫缶" }
+}
+```
+
+At translation time for a target language (e.g. `fr`), this collapses into a hash table injected into the LLM prompt:
+
+```json
+{ "主食罐": "nourriture humide", "狗狗食品": "nourriture pour chien", "貓咪罐頭": "boîte pour chat" }
+```
+
+The LLM then sees a rule like:
+
+```
+GLOSSARY — always translate these terms exactly as shown, no exceptions:
+{"主食罐": "nourriture humide", "狗狗食品": "nourriture pour chien"}
+```
+
+So when translating `"主食罐買一送一"`, the LLM knows to use `"nourriture humide"` instead of making its own choice.
+
+**How it works at runtime:**
+
+```mermaid
+sequenceDiagram
+    participant Translate as translate.ts
+    participant Glossary as glossary.json
+    participant Gemini as Gemini API
+
+    Translate->>Glossary: Read glossary.json
+    Translate->>Translate: Filter by target language (e.g. "fr")<br/>→ build hash table { term: "translation" }
+
+    loop For each string to translate
+        Translate->>Gemini: Send string + context + glossary table
+        Note over Translate,Gemini: "GLOSSARY — always use:<br/>{ 主食罐: nourriture humide, ... }"
+        Gemini-->>Translate: Translated string (terms enforced)
+    end
+```
+
+**How glossary.json is populated:**
+
+Define a `keyWords` array of the domain terms you want to control, then translate each term once (manually or via a script) and write the results into `glossary.json`:
+
+```
+Define keyWords: ["主食罐", "狗狗食品", "貓咪罐頭"]
+    ↓
+Translate each term to all target languages (LLM or manually)
+    ↓
+Write glossary.json → commit to repo
+    ↓
+PM reviews and corrects entries
+```
+
+When a term changes, update its entry in `glossary.json` and commit.
+
+### Translation Memory (TM)
+
+Translation Memory stores every translation result so that identical keys are never sent to the LLM twice. On each run, the TM is checked first — only keys with no existing record hit the LLM.
+
+**Example `tm.json`** (not a file in this repo — you create it if needed):
+
+```json
+{
+  "fr": {
+    "submit": "Soumettre",
+    "welcomeUser": "Bienvenue, {name} !"
+  },
+  "ja": {
+    "submit": "送信",
+    "welcomeUser": "{name}さん、ようこそ！"
+  }
+}
+```
+
+**How it works at runtime:**
+
+```mermaid
+sequenceDiagram
+    participant Translate as translate.ts
+    participant TM as tm.json
+    participant Gemini as Gemini API
+
+    Translate->>TM: Look up keys for target language
+    TM-->>Translate: Hits (already translated) + remaining (unknown)
+
+    Note over Translate: Hits are reused for free — no API call
+
+    alt Remaining keys exist
+        Translate->>Gemini: Send remaining keys + context
+        Gemini-->>Translate: New translations
+        Translate->>TM: Save new translations to tm.json
+    end
+
+    Translate->>Translate: Merge TM hits + new translations → write {lang}.json
+```
 
 ---
 
