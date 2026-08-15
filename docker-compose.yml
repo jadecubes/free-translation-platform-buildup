@@ -11,7 +11,6 @@ services:
       - "8081:443"   # GitLab HTTPS
       - "2222:22"    # SSH
       - "8083:80"    # GitLab HTTP
-      - "8084:8084"  # GitLab Pages
     volumes:
       - ./gitlab-data/config:/etc/gitlab
       - ./gitlab-data/logs:/var/log/gitlab
@@ -39,10 +38,6 @@ services:
         # macOS Docker compatibility
         gitlab_workhorse['listen_network'] = "tcp"
         gitlab_workhorse['listen_addr'] = "127.0.0.1:8181"
-
-        # GitLab Pages
-        pages_external_url 'http://gitlab.local:8084'
-        gitlab_pages['enable'] = true
 
         # Performance optimization - reduce memory usage
         puma['worker_processes'] = 1

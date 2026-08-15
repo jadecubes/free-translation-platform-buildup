@@ -11,6 +11,11 @@ export interface TranslationMap {
   [key: string]: string;
 }
 
+/** Per-language record of the source-value hash each key was last translated from */
+export interface HashManifest {
+  [language: string]: { [key: string]: string };
+}
+
 export interface MergedEntry {
   key: string;
   value: string;

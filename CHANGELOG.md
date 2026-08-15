@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [5.0.0] - 2026-08-16
+
+### 🔧 Simplified Flow
+
+#### Removed
+- **`tools/trigger-page/`** and the `pages` CI job — the manual `translate` job in GitLab's pipeline view is now the trigger. Drops the trigger-token setup step, the Pages port/config, and the browser→API CORS surface.
+
+#### Added
+- **Re-translation on copy edits** — `locales/.translation-hashes.json` records the source-value hash each key was last translated from; keys whose English value changed are sent back to Gemini. Files predating the manifest are trusted and backfilled without re-translation.
+
+#### Fixed
+- **CI branch push** — now authenticates with a `PROJECT_TOKEN` project access token; the default `CI_JOB_TOKEN` has no git-push permission on stock GitLab.
+
 ## [2.1.0] - 2026-01-26
 
 ### 🔧 Simplified Architecture

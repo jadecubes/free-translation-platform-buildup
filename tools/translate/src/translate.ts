@@ -1,13 +1,21 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
+import { createHash } from "crypto";
 import { join } from "path";
 import { GeminiTranslator } from "./gemini.js";
 import type {
   SourceMap,
   TranslationMap,
   MergedEntry,
+  HashManifest,
   TranslateOptions,
   TranslationResult,
 } from "./types.js";
+
+export const HASH_MANIFEST_FILE = ".translation-hashes.json";
+
+export function hashSourceValue(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
 
 export async function translate(
   options: TranslateOptions
@@ -32,6 +40,11 @@ export async function translate(
     );
   }
 
+  const manifestFile = join(outputDir, HASH_MANIFEST_FILE);
+  const manifest: HashManifest = existsSync(manifestFile)
+    ? readJsonFile<HashManifest>(manifestFile)
+    : {};
+
   // Initialize Gemini translator
   const translator = new GeminiTranslator(geminiApiKey);
 
@@ -50,21 +63,29 @@ export async function translate(
         console.log(`  Found existing translations: ${Object.keys(existingMap).length} keys`);
       }
 
-      // Find keys that are new (not in existing translations)
-      const newEntries = entries.filter((e) => !(e.key in existingMap));
+      const langHashes = manifest[language] ?? {};
+
+      // Needs translation: key never translated, or source value changed since
+      // last translation. A key present in the output but absent from the
+      // manifest (files predating the manifest) is trusted and backfilled.
+      const entriesToTranslate = entries.filter((entry) => {
+        if (!(entry.key in existingMap)) return true;
+        const lastHash = langHashes[entry.key];
+        return lastHash !== undefined && lastHash !== hashSourceValue(entry.value);
+      });
 
       const totalKeys = entries.length;
-      const existingKeys = totalKeys - newEntries.length;
-      const newKeyCount = newEntries.length;
+      const existingKeys = totalKeys - entriesToTranslate.length;
+      const newKeyCount = entriesToTranslate.length;
 
       let mergedMap: TranslationMap;
 
-      if (newEntries.length === 0) {
+      if (entriesToTranslate.length === 0) {
         console.log(`  No untranslated keys — skipping translation for ${language}`);
         mergedMap = { ...existingMap };
       } else {
-        console.log(`  Translating ${newEntries.length} new key(s) (${existingKeys} existing kept)...`);
-        const newTranslations = await translator.translate(newEntries, language);
+        console.log(`  Translating ${entriesToTranslate.length} new/updated key(s) (${existingKeys} existing kept)...`);
+        const newTranslations = await translator.translate(entriesToTranslate, language);
 
         // Merge: existing translations + new translations (new overrides if overlap)
         mergedMap = { ...existingMap, ...newTranslations };
@@ -79,6 +100,10 @@ export async function translate(
 
       writeJsonFile(outputFile, mergedMap);
       console.log(`  Saved: ${outputFile}`);
+
+      manifest[language] = Object.fromEntries(
+        Object.keys(mergedMap).map((key) => [key, hashSourceValue(sourceMap[key].value)])
+      );
 
       results.push({
         language,
@@ -101,6 +126,8 @@ export async function translate(
       });
     }
   }
+
+  writeJsonFile(manifestFile, manifest);
 
   return results;
 }
