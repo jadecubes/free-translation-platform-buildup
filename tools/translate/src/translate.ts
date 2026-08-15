@@ -80,7 +80,7 @@ export async function translate(
       let mergedMap: TranslationMap;
 
       if (entriesToTranslate.length === 0) {
-        console.log(`  No untranslated keys — skipping translation for ${language}`);
+        console.log(`  No new or changed keys — skipping translation for ${language}`);
         mergedMap = { ...existingMap };
       } else {
         console.log(`  Translating ${entriesToTranslate.length} new/updated key(s) (${existingKeys} existing kept)...`);

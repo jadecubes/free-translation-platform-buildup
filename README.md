@@ -205,7 +205,7 @@ cd tools/translate && npm ci && npm test
 cd tools/translate && npm ci && GEMINI_API_KEY=your_key npm run test:e2e
 
 # Run translation locally
-cd tools/translate && npm install
+cd tools/translate && npm ci
 GEMINI_API_KEY=your_key TARGET_LANGUAGES=fr,ja npm run translate
 ```
 
