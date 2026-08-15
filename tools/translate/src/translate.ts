@@ -65,9 +65,8 @@ export async function translate(
 
       const langHashes = manifest[language] ?? {};
 
-      // Needs translation: key never translated, or source value changed since
-      // last translation. A key present in the output but absent from the
-      // manifest (files predating the manifest) is trusted and backfilled.
+      // New key, or source value changed since last translation; a key with no
+      // manifest record (files predating the manifest) is trusted and backfilled
       const entriesToTranslate = entries.filter((entry) => {
         if (!(entry.key in existingMap)) return true;
         const lastHash = langHashes[entry.key];

@@ -35,7 +35,7 @@ function writeJson(dir: string, filename: string, data: unknown): string {
   return filePath;
 }
 
-function readJson(filePath: string): Record<string, string> {
+function readJson<T = Record<string, string>>(filePath: string): T {
   return JSON.parse(readFileSync(filePath, "utf-8"));
 }
 
@@ -214,9 +214,7 @@ describe("translate", () => {
     expect(output.submit).toBe("Enregistrer les modifications");
 
     // Manifest now records the hash of the new source value
-    const manifest = readJson(join(dir, HASH_MANIFEST_FILE)) as unknown as {
-      fr: Record<string, string>;
-    };
+    const manifest = readJson<{ fr: Record<string, string> }>(join(dir, HASH_MANIFEST_FILE));
     expect(manifest.fr.submit).toBe(hashSourceValue("Save changes"));
   });
 
@@ -238,9 +236,7 @@ describe("translate", () => {
     expect(results[0].newKeys).toBe(0);
     expect(mockTranslateFn).not.toHaveBeenCalled();
 
-    const manifest = readJson(join(dir, HASH_MANIFEST_FILE)) as unknown as {
-      fr: Record<string, string>;
-    };
+    const manifest = readJson<{ fr: Record<string, string> }>(join(dir, HASH_MANIFEST_FILE));
     expect(manifest.fr.submit).toBe(hashSourceValue("Submit"));
   });
 

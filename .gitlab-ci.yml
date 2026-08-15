@@ -12,7 +12,7 @@ test:
   image: node:20-alpine
   script:
     - cd tools/translate
-    - npm install
+    - npm ci
     - npm test
 
 # --- Translation: manual job, run from the pipeline view or Run pipeline form ---
@@ -27,7 +27,7 @@ translate:
     - git config --global user.name "Translation Bot"
   script:
     - cd tools/translate
-    - npm install
+    - npm ci
     # Set PROJECT_ROOT so translate tool finds locales/ directory
     - export PROJECT_ROOT=$CI_PROJECT_DIR
     - npm run translate
@@ -63,5 +63,3 @@ translate:
   rules:
     - when: manual
       allow_failure: true
-  environment:
-    name: translation
