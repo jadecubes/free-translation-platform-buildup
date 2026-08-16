@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - "tools/translate/**"
-      - "tools/trigger-page/**"
       - ".github/workflows/test.yml"
   pull_request:
     branches: [main]
     paths:
       - "tools/translate/**"
-      - "tools/trigger-page/**"
       - ".github/workflows/test.yml"
 
 jobs:
@@ -25,6 +23,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
         working-directory: tools/translate
-      - name: Run unit tests
-        run: npx vitest run --reporter=verbose
+      - name: Run typecheck and unit tests
+        run: npm test -- --reporter=verbose
         working-directory: tools/translate

@@ -19,8 +19,20 @@ import { mkdtempSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { translate } from "../src/translate.js";
+import type {
+  TranslationResult,
+  SuccessfulTranslation,
+} from "../src/types.js";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+// Narrows a result to the success variant so its stats can be asserted
+function expectSuccess(result: TranslationResult): SuccessfulTranslation {
+  if (!result.success) {
+    throw new Error(`expected a successful translation, got: ${result.error}`);
+  }
+  return result;
+}
 
 function setupTestDir(
   source: Record<string, { value: string; context?: string }>,
@@ -62,8 +74,8 @@ describe.skipIf(!GEMINI_API_KEY)("Translation Flow (end-to-end with real Gemini 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
     expect(results[0].language).toBe("fr");
-    expect(results[0].newKeys).toBe(1);
-    expect(results[0].existingKeys).toBe(0);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(1);
+    expect(expectSuccess(results[0]).requestedKeys).toBe(1);
 
     const output = readOutputFile(dir, "fr");
     expect(output).toHaveProperty("submit");
@@ -141,8 +153,8 @@ describe.skipIf(!GEMINI_API_KEY)("Translation Flow (end-to-end with real Gemini 
     });
 
     expect(results[0].success).toBe(true);
-    expect(results[0].newKeys).toBe(1);
-    expect(results[0].existingKeys).toBe(1);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(1);
+    expect(expectSuccess(results[0]).requestedKeys).toBe(1);
 
     const output = readOutputFile(dir, "fr");
     expect(output.submit).toBe("Envoyer");

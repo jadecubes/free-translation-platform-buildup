@@ -2,8 +2,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { parseSourceMap } from "./translate.js";
-import type { SourceMap } from "./types.js";
+import { parseSourceMap, hashSourceEntry, HASH_MANIFEST_FILE } from "./translate.js";
+import type {
+  SourceMap,
+  HashManifest,
+  TranslationResult,
+  SuccessfulTranslation,
+} from "./types.js";
+
+// Narrows a result to the success variant so its stats can be asserted
+function expectSuccess(result: TranslationResult): SuccessfulTranslation {
+  if (!result.success) {
+    throw new Error(`expected a successful translation, got: ${result.error}`);
+  }
+  return result;
+}
 
 // Shared mock translate function — tests can override per-test via mockResolvedValue
 const mockTranslateFn = vi.fn().mockResolvedValue({
@@ -11,11 +24,12 @@ const mockTranslateFn = vi.fn().mockResolvedValue({
   welcomeUser: "Bienvenue, {name} !",
 });
 
-// Mock the gemini module so translate() never calls the real API
-vi.mock("./gemini.js", () => {
+// Mock only the API client, keeping the real prompt helpers — hashSourceEntry
+// shares normalizeEntry with the prompt, so stubbing it out would test nothing
+vi.mock("./gemini.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./gemini.js")>();
   return {
-    buildPrompt: vi.fn(),
-    parseResponse: vi.fn(),
+    ...actual,
     GeminiTranslator: class MockGeminiTranslator {
       translate = mockTranslateFn;
     },
@@ -35,7 +49,7 @@ function writeJson(dir: string, filename: string, data: unknown): string {
   return filePath;
 }
 
-function readJson(filePath: string): Record<string, string> {
+function readJson<T = Record<string, string>>(filePath: string): T {
   return JSON.parse(readFileSync(filePath, "utf-8"));
 }
 
@@ -97,8 +111,8 @@ describe("translate", () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
-    expect(results[0].newKeys).toBe(2);
-    expect(results[0].existingKeys).toBe(0);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(2);
+    expect(expectSuccess(results[0]).requestedKeys).toBe(2);
 
     // Verify output file was written
     const output = readJson(join(dir, "fr.json"));
@@ -127,8 +141,8 @@ describe("translate", () => {
       geminiApiKey: "fake-key",
     });
 
-    expect(results[0].newKeys).toBe(1);
-    expect(results[0].existingKeys).toBe(1);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(1);
+    expect(expectSuccess(results[0]).requestedKeys).toBe(1);
 
     // Verify mock was called with only the new entry
     expect(mockTranslateFn).toHaveBeenCalledOnce();
@@ -157,7 +171,7 @@ describe("translate", () => {
     });
 
     expect(results[0].success).toBe(true);
-    expect(results[0].newKeys).toBe(0);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(0);
     expect(mockTranslateFn).not.toHaveBeenCalled();
   });
 
@@ -182,6 +196,142 @@ describe("translate", () => {
     const output = readJson(join(dir, "fr.json"));
     expect(output.submit).toBe("Soumettre");
     expect(output).not.toHaveProperty("deletedKey");
+  });
+
+  it("re-translates keys whose source value changed", async () => {
+    const dir = createTempDir();
+    const sourceFile = writeJson(dir, "en-US.json", {
+      submit: { value: "Save changes", context: "Button" },
+    });
+    // Existing translation was made from the old value "Submit"
+    writeJson(dir, "fr.json", { submit: "Soumettre" });
+    writeJson(dir, HASH_MANIFEST_FILE, {
+      fr: { submit: hashSourceEntry({ key: "submit", value: "Submit", context: "Button" }) },
+    });
+
+    mockTranslateFn.mockResolvedValueOnce({
+      submit: "Enregistrer les modifications",
+    });
+
+    const results = await translate({
+      sourceFile,
+      outputDir: dir,
+      targetLanguages: ["fr"],
+      geminiApiKey: "fake-key",
+    });
+
+    expect(expectSuccess(results[0]).translatedKeys).toBe(1);
+    expect(mockTranslateFn).toHaveBeenCalledOnce();
+    expect(mockTranslateFn.mock.calls[0][0][0].key).toBe("submit");
+
+    const output = readJson(join(dir, "fr.json"));
+    expect(output.submit).toBe("Enregistrer les modifications");
+
+    // Manifest now records the hash of the new source value
+    const manifest = readJson<HashManifest>(join(dir, HASH_MANIFEST_FILE));
+    expect(manifest.fr.submit).toBe(hashSourceEntry({ key: "submit", value: "Save changes", context: "Button" }));
+  });
+
+  it("re-translates keys whose context changed", async () => {
+    const dir = createTempDir();
+    const sourceFile = writeJson(dir, "en-US.json", {
+      submit: { value: "Submit", context: "Button that files a tax return" },
+    });
+    // Existing translation was made under a vaguer context
+    writeJson(dir, "fr.json", { submit: "Soumettre" });
+    writeJson(dir, HASH_MANIFEST_FILE, {
+      fr: { submit: hashSourceEntry({ key: "submit", value: "Submit", context: "Button" }) },
+    });
+
+    mockTranslateFn.mockResolvedValueOnce({ submit: "Déclarer" });
+
+    const results = await translate({
+      sourceFile,
+      outputDir: dir,
+      targetLanguages: ["fr"],
+      geminiApiKey: "fake-key",
+    });
+
+    expect(expectSuccess(results[0]).translatedKeys).toBe(1);
+    expect(readJson(join(dir, "fr.json")).submit).toBe("Déclarer");
+  });
+
+  it("keeps the stale hash when the translator omits a requested key", async () => {
+    const dir = createTempDir();
+    const sourceFile = writeJson(dir, "en-US.json", {
+      submit: { value: "Save changes", context: "Button" },
+    });
+    writeJson(dir, "fr.json", { submit: "Soumettre" });
+    writeJson(dir, HASH_MANIFEST_FILE, {
+      fr: { submit: hashSourceEntry({ key: "submit", value: "Submit", context: "Button" }) },
+    });
+
+    // Translator returns nothing for the requested key (partial response)
+    mockTranslateFn.mockResolvedValueOnce({});
+
+    const results = await translate({
+      sourceFile,
+      outputDir: dir,
+      targetLanguages: ["fr"],
+      geminiApiKey: "fake-key",
+    });
+
+    // The dropped key is reported, not counted as translated
+    expect(expectSuccess(results[0]).requestedKeys).toBe(1);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(0);
+    expect(expectSuccess(results[0]).droppedKeys).toEqual(["submit"]);
+
+    // Old translation is kept, and the manifest still records the old hash,
+    // so the key is re-queued on the next run instead of marked up to date
+    const output = readJson(join(dir, "fr.json"));
+    expect(output.submit).toBe("Soumettre");
+    const manifest = readJson<HashManifest>(join(dir, HASH_MANIFEST_FILE));
+    expect(manifest.fr.submit).toBe(hashSourceEntry({ key: "submit", value: "Submit", context: "Button" }));
+  });
+
+  it("does not re-translate when an edit leaves the prompt unchanged", async () => {
+    const dir = createTempDir();
+    // Adding an empty context reads as "no context" in the prompt, so the key
+    // was already translated from exactly this input — no reason to pay again
+    const sourceFile = writeJson(dir, "en-US.json", {
+      submit: { value: "Submit", context: "" },
+    });
+    writeJson(dir, "fr.json", { submit: "Soumettre" });
+    writeJson(dir, HASH_MANIFEST_FILE, {
+      fr: { submit: hashSourceEntry({ key: "submit", value: "Submit" }) },
+    });
+
+    const results = await translate({
+      sourceFile,
+      outputDir: dir,
+      targetLanguages: ["fr"],
+      geminiApiKey: "fake-key",
+    });
+
+    expect(expectSuccess(results[0]).requestedKeys).toBe(0);
+    expect(mockTranslateFn).not.toHaveBeenCalled();
+  });
+
+  it("trusts existing translations without manifest and backfills hashes", async () => {
+    const dir = createTempDir();
+    const sourceFile = writeJson(dir, "en-US.json", {
+      submit: { value: "Submit", context: "Button" },
+    });
+    // Pre-manifest translation file: no hash record exists
+    writeJson(dir, "fr.json", { submit: "Soumettre" });
+
+    const results = await translate({
+      sourceFile,
+      outputDir: dir,
+      targetLanguages: ["fr"],
+      geminiApiKey: "fake-key",
+    });
+
+    expect(expectSuccess(results[0]).translatedKeys).toBe(0);
+    expect(mockTranslateFn).not.toHaveBeenCalled();
+
+    const manifest = readJson<HashManifest>(join(dir, HASH_MANIFEST_FILE));
+    expect(manifest.fr.submit).toBe(hashSourceEntry({ key: "submit", value: "Submit", context: "Button" }));
   });
 
   it("handles multiple target languages", async () => {

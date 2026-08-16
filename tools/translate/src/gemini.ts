@@ -1,18 +1,33 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { MergedEntry, TranslationMap } from "./types.js";
 
+/**
+ * The entry as the translator effectively sees it: an empty context is no
+ * context. Both the prompt and the hash manifest go through here, so the two
+ * agree on what counts as a change without the manifest being pinned to the
+ * prompt's wording — retouching the template below must not re-translate
+ * the whole corpus.
+ */
+export function normalizeEntry(entry: MergedEntry): MergedEntry {
+  return {
+    key: entry.key,
+    value: entry.value,
+    context: entry.context || undefined,
+  };
+}
+
+/** The block describing one key in the prompt. */
+export function describeEntry(entry: MergedEntry): string {
+  const { key, value, context } = normalizeEntry(entry);
+  const contextPart = context ? `\n   Context: ${context}` : "";
+  return `- Key: "${key}"\n   Value: "${value}"${contextPart}`;
+}
+
 export function buildPrompt(
   entries: MergedEntry[],
   targetLanguage: string
 ): string {
-  const entriesDescription = entries
-    .map((entry) => {
-      const contextPart = entry.context
-        ? `\n   Context: ${entry.context}`
-        : "";
-      return `- Key: "${entry.key}"\n   Value: "${entry.value}"${contextPart}`;
-    })
-    .join("\n\n");
+  const entriesDescription = entries.map(describeEntry).join("\n\n");
 
   return `You are a professional translator. Translate the following UI strings from English to ${targetLanguage}.
 

@@ -1,10 +1,9 @@
 stages:
   - test
-  - deploy
   - translate
 
 variables:
-  # Target languages (comma-separated, overridable via Pipeline Trigger API)
+  # Target languages (comma-separated, overridable via Run pipeline form)
   TARGET_LANGUAGES: "fr,ja,zh-Hant-HK"
 
 # --- Unit tests: runs on every push ---
@@ -13,32 +12,10 @@ test:
   image: node:20-alpine
   script:
     - cd tools/translate
-    - npm install
+    - npm ci
     - npm test
-  rules:
-    # Skip tests when pipeline is triggered via API (translate only)
-    - if: '$CI_PIPELINE_SOURCE == "trigger"'
-      when: never
-    - when: on_success
 
-# --- GitLab Pages: serves the translation trigger UI ---
-pages:
-  stage: deploy
-  image: alpine:latest
-  script:
-    - mkdir -p public
-    - cp tools/trigger-page/index.html public/index.html
-    - cp locales/en-US.json public/en-US.json
-  artifacts:
-    paths:
-      - public
-  rules:
-    # Skip pages deployment when pipeline is triggered via API (translate only)
-    - if: '$CI_PIPELINE_SOURCE == "trigger"'
-      when: never
-    - when: on_success
-
-# --- Translation: triggered by Pipeline Trigger API or manual ---
+# --- Translation: manual job, run from the pipeline view or Run pipeline form ---
 translate:
   stage: translate
   image: node:20-alpine
@@ -49,27 +26,35 @@ translate:
     - git config --global user.email "translator@ci.local"
     - git config --global user.name "Translation Bot"
   script:
+    # Fail fast on missing push credentials — before spending Gemini API calls
+    - |
+      if [ -z "$PROJECT_TOKEN" ]; then
+        echo "Missing PROJECT_TOKEN CI variable (project access token with write_repository scope) — required to push the translation branch"
+        exit 1
+      fi
     - cd tools/translate
-    - npm install
+    - npm ci
     # Set PROJECT_ROOT so translate tool finds locales/ directory
     - export PROJECT_ROOT=$CI_PROJECT_DIR
     - npm run translate
     # Check if there are changes to commit
     - cd ../..
+    # Stage first: git diff alone misses untracked files (first run creates new locale files)
+    - git add locales/
     - |
-      if git diff --quiet locales/*.json; then
+      if git diff --cached --quiet; then
         echo "No translation changes detected"
       else
         BRANCH_NAME="translate/$(date +%Y%m%d-%H%M%S)"
         echo "Creating branch $BRANCH_NAME..."
         git checkout -b "$BRANCH_NAME"
-        git add locales/*.json
-        git commit -m "chore: update translations
-
-        Auto-translated by Gemini Translation Bot"
-        git push origin "$BRANCH_NAME"
+        git commit -m "chore: update translations"
+        # http.sslVerify=false: local GitLab uses a self-signed certificate
+        git -c http.sslVerify=false push \
+          "${CI_SERVER_PROTOCOL}://oauth2:${PROJECT_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/${CI_PROJECT_PATH}.git" \
+          "$BRANCH_NAME"
         echo "Creating Merge Request..."
-        curl --fail --request POST \
+        curl --fail --insecure --request POST \
           --header "JOB-TOKEN: $CI_JOB_TOKEN" \
           "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests" \
           --form "source_branch=$BRANCH_NAME" \
@@ -78,11 +63,5 @@ translate:
           --form "remove_source_branch=true"
       fi
   rules:
-    # Run when triggered via Pipeline Trigger API (from the trigger page)
-    - if: '$CI_PIPELINE_SOURCE == "trigger"'
-      when: on_success
-    # Allow manual trigger from GitLab CI/CD UI
     - when: manual
       allow_failure: true
-  environment:
-    name: translation

@@ -11,6 +11,11 @@ export interface TranslationMap {
   [key: string]: string;
 }
 
+/** Per-language record of the source hash (value + context) each key was last translated from */
+export interface HashManifest {
+  [language: string]: { [key: string]: string };
+}
+
 export interface MergedEntry {
   key: string;
   value: string;
@@ -24,12 +29,22 @@ export interface TranslateOptions {
   geminiApiKey: string;
 }
 
-export interface TranslationResult {
+export interface SuccessfulTranslation {
   language: string;
-  translations: TranslationMap;
-  success: boolean;
-  error?: string;
-  totalKeys?: number;
-  newKeys?: number;
-  existingKeys?: number;
+  success: true;
+  totalKeys: number;
+  /** Keys sent to the translator this run (new key, or source changed) */
+  requestedKeys: number;
+  /** Keys the translator returned a value for; below requestedKeys if it dropped some */
+  translatedKeys: number;
+  /** Requested keys the translator returned nothing for — left untranslated, retried next run */
+  droppedKeys: string[];
 }
+
+export interface FailedTranslation {
+  language: string;
+  success: false;
+  error: string;
+}
+
+export type TranslationResult = SuccessfulTranslation | FailedTranslation;
