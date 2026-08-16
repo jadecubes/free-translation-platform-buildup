@@ -1,0 +1,10 @@
+// Typecheck-only config: covers the test suites too, so a change to a public
+// type (e.g. TranslationResult) can't silently rot a suite that CI doesn't run.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "e2e/**/*"]
+}

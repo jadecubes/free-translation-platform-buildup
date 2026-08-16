@@ -8,7 +8,8 @@
     "build": "tsc",
     "translate": "tsc && node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "test": "npm run typecheck && vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "keywords": [

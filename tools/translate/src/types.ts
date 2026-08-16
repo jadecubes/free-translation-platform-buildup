@@ -11,7 +11,7 @@ export interface TranslationMap {
   [key: string]: string;
 }
 
-/** Per-language record of the source-value hash each key was last translated from */
+/** Per-language record of the source hash (value + context) each key was last translated from */
 export interface HashManifest {
   [language: string]: { [key: string]: string };
 }
@@ -35,8 +35,10 @@ export interface TranslationResult {
   success: boolean;
   error?: string;
   totalKeys?: number;
-  /** Keys sent to the translator this run (new key, or source value changed) */
+  /** Keys sent to the translator this run (new key, or source changed) */
+  requestedKeys?: number;
+  /** Keys the translator returned a value for; below requestedKeys if it dropped some */
   translatedKeys?: number;
-  /** Keys kept as-is (already translated from an unchanged source value) */
+  /** Keys kept as-is (already translated from an unchanged source) */
   skippedKeys?: number;
 }

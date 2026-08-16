@@ -39,7 +39,7 @@ async function main() {
     console.log(`Successful: ${successful.length}/${results.length}`);
     for (const r of successful) {
       if (r.totalKeys !== undefined) {
-        console.log(`  ${r.language}: ${r.translatedKeys} translated (new/changed), ${r.skippedKeys} unchanged (${r.totalKeys} total)`);
+        console.log(`  ${r.language}: ${r.translatedKeys}/${r.requestedKeys} requested keys translated, ${r.skippedKeys} unchanged (${r.totalKeys} total)`);
       }
     }
     if (failed.length > 0) {

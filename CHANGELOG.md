@@ -10,10 +10,11 @@ All notable changes to this project will be documented in this file.
 - **`tools/trigger-page/`** and the `pages` CI job — the manual `translate` job in GitLab's pipeline view is now the trigger. Drops the trigger-token setup step, the Pages port/config, and the browser→API CORS surface.
 
 #### Added
-- **Re-translation on copy edits** — `locales/.translation-hashes.json` records the source-value hash each key was last translated from; keys whose English value changed are sent back to Gemini. Files predating the manifest are trusted and backfilled without re-translation.
+- **Re-translation on copy edits** — `locales/.translation-hashes.json` records the source hash (English value + context) each key was last translated from; keys whose English value or context changed are sent back to Gemini — sharpening a key's context is the intended way to fix a bad translation, so it re-translates too. Files predating the manifest are trusted and backfilled without re-translation.
 
 #### Fixed
-- **CI branch push** — now authenticates with a `PROJECT_TOKEN` project access token; the default `CI_JOB_TOKEN` has no git-push permission on stock GitLab.
+- **CI branch push** — now authenticates with a `PROJECT_TOKEN` project access token; the default `CI_JOB_TOKEN` has no git-push permission on stock GitLab. The job checks the variable is set before translating, so a misconfigured project fails without spending Gemini calls.
+- **Partial Gemini responses** — a key the model fails to return keeps its previous hash in the manifest, so it is retried on the next run instead of being recorded as up to date.
 
 ## [2.1.0] - 2026-01-26
 

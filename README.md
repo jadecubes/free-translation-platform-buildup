@@ -91,7 +91,7 @@ Each key maps to a `{ value, context }` object:
 
 ### What gets (re)translated
 
-A key is sent to Gemini when it is **new** (missing from the target file) or its **English value changed** since it was last translated. Change detection uses `locales/.translation-hashes.json`, a generated manifest recording the source-value hash each key was last translated from — commit it along with the locale files. Keys present in a target file but absent from the manifest (files predating it) are trusted as-is and only get their hash backfilled.
+A key is sent to Gemini when it is **new** (missing from the target file) or its **English value or context changed** since it was last translated. Change detection uses `locales/.translation-hashes.json`, a generated manifest recording the source hash (English value + context) each key was last translated from — commit it along with the locale files. Keys present in a target file but absent from the manifest (files predating it) are trusted as-is and only get their hash backfilled.
 
 ### Missing Context Warnings
 
@@ -140,7 +140,7 @@ Translation still proceeds (soft mode).
 │   └── test.yml            # GitHub Actions: runs tests on every push/PR
 ├── locales/
 │   ├── en-US.json          # Source strings with context ({ value, context } per key)
-│   ├── .translation-hashes.json  # Generated: source-value hash each key was last translated from
+│   ├── .translation-hashes.json  # Generated: source hash (English value + context) each key was last translated from
 │   ├── fr.json             # Generated: French translations
 │   ├── ja.json             # Generated: Japanese translations
 │   └── zh-Hant-HK.json     # Generated: Chinese (Traditional) translations
@@ -171,7 +171,7 @@ Translation still proceeds (soft mode).
 | `setup.sh` | One-time setup script: copies `.env.template`, validates API key, starts Docker containers |
 | `locales/en-US.json` | Source English strings with context (`{ value, context }` per key) — the single source of truth for all translations |
 | `locales/{lang}.json` | Generated translation files (e.g. `fr.json`, `ja.json`) — output of the translation pipeline |
-| `locales/.translation-hashes.json` | Generated manifest — source-value hash each key was last translated from, drives re-translation when English copy changes |
+| `locales/.translation-hashes.json` | Generated manifest — source hash (English value + context) each key was last translated from, drives re-translation when English copy or context changes |
 | `tools/translate/src/index.ts` | CLI entry point — reads environment variables, resolves file paths, calls `translate()`, prints summary |
 | `tools/translate/src/translate.ts` | Core translation orchestrator — reads source, existing translations and hash manifest, sends only new/changed keys to Gemini, merges results, writes output files |
 | `tools/translate/src/gemini.ts` | Gemini API wrapper — builds translation prompts with key/value/context, calls `generateContent()`, parses JSON response |
@@ -237,6 +237,8 @@ Test the internal logic without calling the Gemini API. Gemini is mocked — the
 | `translate.test.ts` | skips when all keys translated | `translate()` never calls Gemini when nothing is new |
 | `translate.test.ts` | removes stale keys not in source | `translate()` cleans up keys deleted from `en-US.json` |
 | `translate.test.ts` | re-translates keys whose source value changed | hash manifest triggers re-translation when English copy is edited |
+| `translate.test.ts` | re-translates keys whose context changed | sharpening a key's context re-translates it, since context is sent to Gemini too |
+| `translate.test.ts` | keeps the stale hash when the translator omits a requested key | a dropped key is retried next run instead of being recorded as up to date |
 | `translate.test.ts` | trusts existing translations without manifest and backfills hashes | pre-manifest translation files don't cause a re-translation storm |
 | `translate.test.ts` | handles multiple target languages | `translate()` produces output files for each language |
 
@@ -472,7 +474,7 @@ sequenceDiagram
 | **Trigger** | Developer clicks the manual `translate` job in the pipeline view (or uses the Run pipeline form to override `TARGET_LANGUAGES`). Translation is never auto-triggered by git push, to control Gemini API costs. | GitLab UI |
 | **Dispatch** | GitLab CI engine dispatches the translate job to the Runner, which spins up an ephemeral `node:20-alpine` container. | `.gitlab-ci.yml` |
 | **Fetch existing** | For each target language, reads the existing translation file (e.g. `fr.json`) and the hash manifest from the repository. Returns `{}` if a file doesn't exist yet. | `tools/translate/src/translate.ts` — `readJsonFile()` |
-| **Compare & extract** | Parses source entries (value + context), then compares against existing translations and the hash manifest. Keys that are missing, or whose English value changed since last translation, are marked for translation. | `tools/translate/src/translate.ts` — `parseSourceMap()`, `entries.filter()` |
+| **Compare & extract** | Parses source entries (value + context), then compares against existing translations and the hash manifest. Keys that are missing, or whose English value or context changed since last translation, are marked for translation. | `tools/translate/src/translate.ts` — `parseSourceMap()`, `entries.filter()` |
 | **Translate** | For each language, sends only the untranslated keys (with their values and context) to the Gemini API. Languages with no new keys are skipped entirely. | `tools/translate/src/gemini.ts` — `buildPrompt()`, `translate()` |
 | **Merge & write** | Merges new translations over existing ones (`{ ...existing, ...new }`), removes keys that no longer exist in source, writes the output file and updates the hash manifest. | `tools/translate/src/translate.ts` — `writeJsonFile()` |
 | **Branch & MR** | Creates a new git branch (`translate/YYYYMMDD-HHMMSS`), commits the changed locale files, pushes the branch using the `PROJECT_TOKEN` access token, and creates a Merge Request via the GitLab API with `remove_source_branch=true`. | `.gitlab-ci.yml` — git commands + `curl` to GitLab API |
@@ -485,7 +487,7 @@ sequenceDiagram
 **Version:** 5.0.0
 **Changes from 4.x:**
 - Removed the GitLab Pages trigger page — GitLab's built-in manual `translate` job is the trigger (no trigger token, no Pages, no browser→API CORS surface)
-- Edited English copy now re-translates: `locales/.translation-hashes.json` records the source-value hash each key was last translated from
+- Edited English copy now re-translates: `locales/.translation-hashes.json` records the source hash (English value + context) each key was last translated from
 - Branch push authenticates with a `PROJECT_TOKEN` project access token (the CI job token cannot push by default)
 
 ---

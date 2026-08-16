@@ -13,8 +13,19 @@ import type {
 
 export const HASH_MANIFEST_FILE = ".translation-hashes.json";
 
-export function hashSourceValue(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+/**
+ * Hash of everything the translator is given for a key — value *and* context.
+ * Sharpening a key's context is the intended way to fix a bad translation, so
+ * it has to invalidate the old one just like editing the English copy does.
+ */
+export function hashSourceEntry(entry: {
+  value: string;
+  context?: string;
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify([entry.value, entry.context ?? null]))
+    .digest("hex")
+    .slice(0, 12);
 }
 
 export async function translate(
@@ -43,9 +54,9 @@ export async function translate(
   const manifestFile = join(outputDir, HASH_MANIFEST_FILE);
   const manifest = readJsonFileIfExists<HashManifest>(manifestFile, {});
 
-  // Source-value hashes are language-independent — compute once, not per language
+  // Source hashes are language-independent — compute once, not per language
   const sourceHashes: HashManifest[string] = Object.fromEntries(
-    entries.map((entry) => [entry.key, hashSourceValue(entry.value)])
+    entries.map((entry) => [entry.key, hashSourceEntry(entry)])
   );
 
   // Initialize Gemini translator
@@ -70,10 +81,16 @@ export async function translate(
       // with no record predates the manifest: trust it and backfill from the
       // current source, so the rest of the run has one hash per translated key.
       const langHashes: HashManifest[string] = { ...(manifest[language] ?? {}) };
-      for (const key of Object.keys(existingMap)) {
-        if (!(key in langHashes) && key in sourceHashes) {
-          langHashes[key] = sourceHashes[key];
-        }
+      const backfilledKeys = Object.keys(existingMap).filter(
+        (key) => !(key in langHashes) && key in sourceHashes
+      );
+      for (const key of backfilledKeys) {
+        langHashes[key] = sourceHashes[key];
+      }
+      if (backfilledKeys.length > 0) {
+        console.log(
+          `  No hash record for ${backfilledKeys.length} existing key(s) — trusting them and backfilling`
+        );
       }
 
       // New key, or source value changed since it was last translated
@@ -84,15 +101,27 @@ export async function translate(
       );
 
       const totalKeys = entries.length;
-      const translatedKeys = entriesToTranslate.length;
-      const skippedKeys = totalKeys - translatedKeys;
+      const requestedKeys = entriesToTranslate.length;
+      const skippedKeys = totalKeys - requestedKeys;
 
       let newTranslations: TranslationMap = {};
-      if (entriesToTranslate.length === 0) {
+      if (requestedKeys === 0) {
         console.log(`  No new or changed keys — skipping translation for ${language}`);
       } else {
-        console.log(`  Translating ${translatedKeys} new/updated key(s) (${skippedKeys} unchanged kept)...`);
+        console.log(`  Translating ${requestedKeys} new/updated key(s) (${skippedKeys} unchanged kept)...`);
         newTranslations = await translator.translate(entriesToTranslate, language);
+      }
+
+      // What the translator actually returned, which is what the manifest and
+      // the summary both report — a requested key it dropped is not translated
+      const translatedKeys = Object.keys(newTranslations).length;
+      if (translatedKeys < requestedKeys) {
+        const dropped = entriesToTranslate
+          .filter((entry) => !(entry.key in newTranslations))
+          .map((entry) => entry.key);
+        console.warn(
+          `  Translator returned no value for ${dropped.length} requested key(s) — left untranslated, will retry next run: ${dropped.join(", ")}`
+        );
       }
 
       // Merge: existing translations + new translations (new overrides if overlap)
@@ -124,6 +153,7 @@ export async function translate(
         translations: mergedMap,
         success: true,
         totalKeys,
+        requestedKeys,
         translatedKeys,
         skippedKeys,
       });

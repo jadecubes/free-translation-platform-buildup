@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { parseSourceMap, hashSourceValue, HASH_MANIFEST_FILE } from "./translate.js";
+import { parseSourceMap, hashSourceEntry, HASH_MANIFEST_FILE } from "./translate.js";
 import type { SourceMap, HashManifest } from "./types.js";
 
 // Shared mock translate function — tests can override per-test via mockResolvedValue
@@ -192,7 +192,7 @@ describe("translate", () => {
     // Existing translation was made from the old value "Submit"
     writeJson(dir, "fr.json", { submit: "Soumettre" });
     writeJson(dir, HASH_MANIFEST_FILE, {
-      fr: { submit: hashSourceValue("Submit") },
+      fr: { submit: hashSourceEntry({ value: "Submit", context: "Button" }) },
     });
 
     mockTranslateFn.mockResolvedValueOnce({
@@ -215,7 +215,31 @@ describe("translate", () => {
 
     // Manifest now records the hash of the new source value
     const manifest = readJson<HashManifest>(join(dir, HASH_MANIFEST_FILE));
-    expect(manifest.fr.submit).toBe(hashSourceValue("Save changes"));
+    expect(manifest.fr.submit).toBe(hashSourceEntry({ value: "Save changes", context: "Button" }));
+  });
+
+  it("re-translates keys whose context changed", async () => {
+    const dir = createTempDir();
+    const sourceFile = writeJson(dir, "en-US.json", {
+      submit: { value: "Submit", context: "Button that files a tax return" },
+    });
+    // Existing translation was made under a vaguer context
+    writeJson(dir, "fr.json", { submit: "Soumettre" });
+    writeJson(dir, HASH_MANIFEST_FILE, {
+      fr: { submit: hashSourceEntry({ value: "Submit", context: "Button" }) },
+    });
+
+    mockTranslateFn.mockResolvedValueOnce({ submit: "Déclarer" });
+
+    const results = await translate({
+      sourceFile,
+      outputDir: dir,
+      targetLanguages: ["fr"],
+      geminiApiKey: "fake-key",
+    });
+
+    expect(results[0].translatedKeys).toBe(1);
+    expect(readJson(join(dir, "fr.json")).submit).toBe("Déclarer");
   });
 
   it("keeps the stale hash when the translator omits a requested key", async () => {
@@ -225,7 +249,7 @@ describe("translate", () => {
     });
     writeJson(dir, "fr.json", { submit: "Soumettre" });
     writeJson(dir, HASH_MANIFEST_FILE, {
-      fr: { submit: hashSourceValue("Submit") },
+      fr: { submit: hashSourceEntry({ value: "Submit", context: "Button" }) },
     });
 
     // Translator returns nothing for the requested key (partial response)
@@ -243,7 +267,7 @@ describe("translate", () => {
     const output = readJson(join(dir, "fr.json"));
     expect(output.submit).toBe("Soumettre");
     const manifest = readJson<HashManifest>(join(dir, HASH_MANIFEST_FILE));
-    expect(manifest.fr.submit).toBe(hashSourceValue("Submit"));
+    expect(manifest.fr.submit).toBe(hashSourceEntry({ value: "Submit", context: "Button" }));
   });
 
   it("trusts existing translations without manifest and backfills hashes", async () => {
@@ -265,7 +289,7 @@ describe("translate", () => {
     expect(mockTranslateFn).not.toHaveBeenCalled();
 
     const manifest = readJson<HashManifest>(join(dir, HASH_MANIFEST_FILE));
-    expect(manifest.fr.submit).toBe(hashSourceValue("Submit"));
+    expect(manifest.fr.submit).toBe(hashSourceEntry({ value: "Submit", context: "Button" }));
   });
 
   it("handles multiple target languages", async () => {
