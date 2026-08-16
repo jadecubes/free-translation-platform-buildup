@@ -1,10 +1,14 @@
+// Whole-project config: covers the test suites as well as src, so a change to a
+// public type surfaces in the editor and in `npm test` even for a suite CI does
+// not run. `npm run build` uses tsconfig.build.json, which emits src alone.
 {
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "node",
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
+    "noEmit": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -12,6 +16,6 @@
     "resolveJsonModule": true,
     "declaration": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "e2e/**/*"],
   "exclude": ["node_modules", "dist"]
 }

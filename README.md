@@ -147,7 +147,8 @@ Translation still proceeds (soft mode).
 └── tools/
     └── translate/          # TypeScript translation tool
         ├── package.json
-        ├── tsconfig.json
+        ├── tsconfig.json         # Typecheck config — covers src/ and e2e/, so `npm test` catches type rot in the suite CI can't run
+        ├── tsconfig.build.json   # Build config — emits src/ to dist/
         ├── vitest.config.ts      # Unit test config (src/**/*.test.ts)
         ├── vitest.e2e.config.ts  # E2E test config (e2e/**/*.test.ts)
         ├── src/
@@ -238,6 +239,7 @@ Test the internal logic without calling the Gemini API. Gemini is mocked — the
 | `translate.test.ts` | removes stale keys not in source | `translate()` cleans up keys deleted from `en-US.json` |
 | `translate.test.ts` | re-translates keys whose source value changed | hash manifest triggers re-translation when English copy is edited |
 | `translate.test.ts` | re-translates keys whose context changed | sharpening a key's context re-translates it, since context is sent to Gemini too |
+| `translate.test.ts` | does not re-translate when an edit leaves the prompt unchanged | the hash is of the prompt block, so a no-op edit (e.g. adding an empty context) costs nothing |
 | `translate.test.ts` | keeps the stale hash when the translator omits a requested key | a dropped key is retried next run instead of being recorded as up to date |
 | `translate.test.ts` | trusts existing translations without manifest and backfills hashes | pre-manifest translation files don't cause a re-translation storm |
 | `translate.test.ts` | handles multiple target languages | `translate()` produces output files for each language |
@@ -473,7 +475,7 @@ sequenceDiagram
 | **Test** | On every push, runs unit tests for the translation tool (prompt building, response parsing, differential translation logic). | `.gitlab-ci.yml` (`test` job), `tools/translate/src/*.test.ts` |
 | **Trigger** | Developer clicks the manual `translate` job in the pipeline view (or uses the Run pipeline form to override `TARGET_LANGUAGES`). Translation is never auto-triggered by git push, to control Gemini API costs. | GitLab UI |
 | **Dispatch** | GitLab CI engine dispatches the translate job to the Runner, which spins up an ephemeral `node:20-alpine` container. | `.gitlab-ci.yml` |
-| **Fetch existing** | For each target language, reads the existing translation file (e.g. `fr.json`) and the hash manifest from the repository. Returns `{}` if a file doesn't exist yet. | `tools/translate/src/translate.ts` — `readJsonFile()` |
+| **Fetch existing** | For each target language, reads the existing translation file (e.g. `fr.json`) and the hash manifest from the repository. Returns `{}` if a file doesn't exist yet. | `tools/translate/src/translate.ts` — `readJsonFileIfExists()` |
 | **Compare & extract** | Parses source entries (value + context), then compares against existing translations and the hash manifest. Keys that are missing, or whose English value or context changed since last translation, are marked for translation. | `tools/translate/src/translate.ts` — `parseSourceMap()`, `entries.filter()` |
 | **Translate** | For each language, sends only the untranslated keys (with their values and context) to the Gemini API. Languages with no new keys are skipped entirely. | `tools/translate/src/gemini.ts` — `buildPrompt()`, `translate()` |
 | **Merge & write** | Merges new translations over existing ones (`{ ...existing, ...new }`), removes keys that no longer exist in source, writes the output file and updates the hash manifest. | `tools/translate/src/translate.ts` — `writeJsonFile()` |

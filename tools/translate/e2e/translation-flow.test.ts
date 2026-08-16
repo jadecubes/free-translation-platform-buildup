@@ -63,7 +63,7 @@ describe.skipIf(!GEMINI_API_KEY)("Translation Flow (end-to-end with real Gemini 
     expect(results[0].success).toBe(true);
     expect(results[0].language).toBe("fr");
     expect(results[0].translatedKeys).toBe(1);
-    expect(results[0].skippedKeys).toBe(0);
+    expect(results[0].requestedKeys).toBe(1);
 
     const output = readOutputFile(dir, "fr");
     expect(output).toHaveProperty("submit");
@@ -142,7 +142,7 @@ describe.skipIf(!GEMINI_API_KEY)("Translation Flow (end-to-end with real Gemini 
 
     expect(results[0].success).toBe(true);
     expect(results[0].translatedKeys).toBe(1);
-    expect(results[0].skippedKeys).toBe(1);
+    expect(results[0].requestedKeys).toBe(1);
 
     const output = readOutputFile(dir, "fr");
     expect(output.submit).toBe("Envoyer");

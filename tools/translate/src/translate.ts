@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { createHash } from "crypto";
 import { join } from "path";
-import { GeminiTranslator } from "./gemini.js";
+import { GeminiTranslator, describeEntry } from "./gemini.js";
 import type {
   SourceMap,
   TranslationMap,
@@ -14,16 +14,13 @@ import type {
 export const HASH_MANIFEST_FILE = ".translation-hashes.json";
 
 /**
- * Hash of everything the translator is given for a key — value *and* context.
- * Sharpening a key's context is the intended way to fix a bad translation, so
- * it has to invalidate the old one just like editing the English copy does.
+ * Hash of exactly what the translator is given for a key — the prompt block
+ * itself, so an edit that changes the prompt (value *or* context) re-translates,
+ * and one that doesn't (adding an empty context) doesn't.
  */
-export function hashSourceEntry(entry: {
-  value: string;
-  context?: string;
-}): string {
+export function hashSourceEntry(entry: MergedEntry): string {
   return createHash("sha256")
-    .update(JSON.stringify([entry.value, entry.context ?? null]))
+    .update(describeEntry(entry))
     .digest("hex")
     .slice(0, 12);
 }
@@ -102,25 +99,24 @@ export async function translate(
 
       const totalKeys = entries.length;
       const requestedKeys = entriesToTranslate.length;
-      const skippedKeys = totalKeys - requestedKeys;
 
       let newTranslations: TranslationMap = {};
       if (requestedKeys === 0) {
         console.log(`  No new or changed keys — skipping translation for ${language}`);
       } else {
-        console.log(`  Translating ${requestedKeys} new/updated key(s) (${skippedKeys} unchanged kept)...`);
+        console.log(`  Translating ${requestedKeys} new/updated key(s) (${totalKeys - requestedKeys} unchanged kept)...`);
         newTranslations = await translator.translate(entriesToTranslate, language);
       }
 
-      // What the translator actually returned, which is what the manifest and
-      // the summary both report — a requested key it dropped is not translated
-      const translatedKeys = Object.keys(newTranslations).length;
-      if (translatedKeys < requestedKeys) {
-        const dropped = entriesToTranslate
-          .filter((entry) => !(entry.key in newTranslations))
-          .map((entry) => entry.key);
+      // Report what the translator actually returned, which is what the manifest
+      // records too — a requested key it dropped is not translated
+      const droppedKeys = entriesToTranslate
+        .filter((entry) => !(entry.key in newTranslations))
+        .map((entry) => entry.key);
+      const translatedKeys = requestedKeys - droppedKeys.length;
+      if (droppedKeys.length > 0) {
         console.warn(
-          `  Translator returned no value for ${dropped.length} requested key(s) — left untranslated, will retry next run: ${dropped.join(", ")}`
+          `  Translator returned no value for ${droppedKeys.length} requested key(s) — left untranslated, will retry next run: ${droppedKeys.join(", ")}`
         );
       }
 
@@ -155,7 +151,7 @@ export async function translate(
         totalKeys,
         requestedKeys,
         translatedKeys,
-        skippedKeys,
+        droppedKeys,
       });
     } catch (error) {
       const errorMessage =

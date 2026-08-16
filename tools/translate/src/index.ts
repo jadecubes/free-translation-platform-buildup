@@ -38,8 +38,12 @@ async function main() {
 
     console.log(`Successful: ${successful.length}/${results.length}`);
     for (const r of successful) {
-      if (r.totalKeys !== undefined) {
-        console.log(`  ${r.language}: ${r.translatedKeys}/${r.requestedKeys} requested keys translated, ${r.skippedKeys} unchanged (${r.totalKeys} total)`);
+      if (r.totalKeys !== undefined && r.requestedKeys !== undefined) {
+        const unchanged = r.totalKeys - r.requestedKeys;
+        console.log(`  ${r.language}: ${r.translatedKeys} translated, ${unchanged} unchanged (${r.totalKeys} total)`);
+        if (r.droppedKeys && r.droppedKeys.length > 0) {
+          console.log(`    left untranslated, retried next run: ${r.droppedKeys.join(", ")}`);
+        }
       }
     }
     if (failed.length > 0) {
@@ -48,7 +52,15 @@ async function main() {
       process.exit(1);
     }
 
-    console.log("\nTranslation completed successfully!");
+    const totalDropped = successful.reduce(
+      (sum, r) => sum + (r.droppedKeys?.length ?? 0),
+      0
+    );
+    console.log(
+      totalDropped > 0
+        ? `\nTranslation completed with ${totalDropped} key(s) left untranslated — re-run to retry them.`
+        : "\nTranslation completed successfully!"
+    );
   } catch (error) {
     console.error("Translation failed:", error);
     process.exit(1);

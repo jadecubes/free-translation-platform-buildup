@@ -39,6 +39,6 @@ export interface TranslationResult {
   requestedKeys?: number;
   /** Keys the translator returned a value for; below requestedKeys if it dropped some */
   translatedKeys?: number;
-  /** Keys kept as-is (already translated from an unchanged source) */
-  skippedKeys?: number;
+  /** Requested keys the translator returned nothing for — left untranslated, retried next run */
+  droppedKeys?: string[];
 }
