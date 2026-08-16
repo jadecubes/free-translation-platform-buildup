@@ -44,7 +44,7 @@ export async function translate(
   const manifest = readJsonFileIfExists<HashManifest>(manifestFile, {});
 
   // Source-value hashes are language-independent — compute once, not per language
-  const sourceHashes: { [key: string]: string } = Object.fromEntries(
+  const sourceHashes: HashManifest[string] = Object.fromEntries(
     entries.map((entry) => [entry.key, hashSourceValue(entry.value)])
   );
 
@@ -61,19 +61,27 @@ export async function translate(
       // Read existing translations for this language
       const outputFile = join(outputDir, `${language}.json`);
       const existingMap = readJsonFileIfExists<TranslationMap>(outputFile, {});
-      if (Object.keys(existingMap).length > 0) {
-        console.log(`  Found existing translations: ${Object.keys(existingMap).length} keys`);
+      const existingCount = Object.keys(existingMap).length;
+      if (existingCount > 0) {
+        console.log(`  Found existing translations: ${existingCount} keys`);
       }
 
-      const langHashes = manifest[language] ?? {};
+      // Hashes this language was last translated from. An already-translated key
+      // with no record predates the manifest: trust it and backfill from the
+      // current source, so the rest of the run has one hash per translated key.
+      const langHashes: HashManifest[string] = { ...(manifest[language] ?? {}) };
+      for (const key of Object.keys(existingMap)) {
+        if (!(key in langHashes) && key in sourceHashes) {
+          langHashes[key] = sourceHashes[key];
+        }
+      }
 
-      // New key, or source value changed since last translation; a key with no
-      // manifest record (files predating the manifest) is trusted and backfilled
-      const entriesToTranslate = entries.filter((entry) => {
-        if (!(entry.key in existingMap)) return true;
-        const lastHash = langHashes[entry.key];
-        return lastHash !== undefined && lastHash !== sourceHashes[entry.key];
-      });
+      // New key, or source value changed since it was last translated
+      const entriesToTranslate = entries.filter(
+        (entry) =>
+          !(entry.key in existingMap) ||
+          langHashes[entry.key] !== sourceHashes[entry.key]
+      );
 
       const totalKeys = entries.length;
       const translatedKeys = entriesToTranslate.length;
@@ -100,16 +108,14 @@ export async function translate(
       writeJsonFile(outputFile, mergedMap);
       console.log(`  Saved: ${outputFile}`);
 
-      // Record what each key was actually translated from: keys just returned by
-      // the translator (or trusted pre-manifest keys with no record) get the
-      // current source hash; anything else keeps its old hash, so a key the
-      // translator failed to return stays flagged as stale and is retried next run
+      // Record what each key was actually translated from: keys the translator
+      // just returned get the current source hash, anything else keeps its prior
+      // hash — so a key the translator failed to return stays flagged as stale
+      // and is retried next run instead of being marked up to date
       manifest[language] = Object.fromEntries(
         Object.keys(mergedMap).map((key) => [
           key,
-          key in newTranslations || !(key in langHashes)
-            ? sourceHashes[key]
-            : langHashes[key],
+          key in newTranslations ? sourceHashes[key] : langHashes[key],
         ])
       );
 
