@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { createHash } from "crypto";
 import { join } from "path";
-import { GeminiTranslator, describeEntry } from "./gemini.js";
+import { GeminiTranslator, normalizeEntry } from "./gemini.js";
 import type {
   SourceMap,
   TranslationMap,
@@ -14,13 +14,14 @@ import type {
 export const HASH_MANIFEST_FILE = ".translation-hashes.json";
 
 /**
- * Hash of exactly what the translator is given for a key — the prompt block
- * itself, so an edit that changes the prompt (value *or* context) re-translates,
- * and one that doesn't (adding an empty context) doesn't.
+ * Hash of what the translator is given for a key — value and context, sharing
+ * the prompt's own normalization. An edit that changes either re-translates;
+ * one that changes neither (adding an empty context) does not.
  */
 export function hashSourceEntry(entry: MergedEntry): string {
+  const { value, context } = normalizeEntry(entry);
   return createHash("sha256")
-    .update(describeEntry(entry))
+    .update(JSON.stringify([value, context ?? null]))
     .digest("hex")
     .slice(0, 12);
 }
@@ -114,11 +115,6 @@ export async function translate(
         .filter((entry) => !(entry.key in newTranslations))
         .map((entry) => entry.key);
       const translatedKeys = requestedKeys - droppedKeys.length;
-      if (droppedKeys.length > 0) {
-        console.warn(
-          `  Translator returned no value for ${droppedKeys.length} requested key(s) — left untranslated, will retry next run: ${droppedKeys.join(", ")}`
-        );
-      }
 
       // Merge: existing translations + new translations (new overrides if overlap)
       const mergedMap: TranslationMap = { ...existingMap, ...newTranslations };

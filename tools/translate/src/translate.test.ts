@@ -3,7 +3,20 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { parseSourceMap, hashSourceEntry, HASH_MANIFEST_FILE } from "./translate.js";
-import type { SourceMap, HashManifest } from "./types.js";
+import type {
+  SourceMap,
+  HashManifest,
+  TranslationResult,
+  SuccessfulTranslation,
+} from "./types.js";
+
+// Narrows a result to the success variant so its stats can be asserted
+function expectSuccess(result: TranslationResult): SuccessfulTranslation {
+  if (!result.success) {
+    throw new Error(`expected a successful translation, got: ${result.error}`);
+  }
+  return result;
+}
 
 // Shared mock translate function — tests can override per-test via mockResolvedValue
 const mockTranslateFn = vi.fn().mockResolvedValue({
@@ -12,7 +25,7 @@ const mockTranslateFn = vi.fn().mockResolvedValue({
 });
 
 // Mock only the API client, keeping the real prompt helpers — hashSourceEntry
-// hashes describeEntry's output, so stubbing it out would test nothing
+// shares normalizeEntry with the prompt, so stubbing it out would test nothing
 vi.mock("./gemini.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./gemini.js")>();
   return {
@@ -98,8 +111,8 @@ describe("translate", () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
-    expect(results[0].translatedKeys).toBe(2);
-    expect(results[0].requestedKeys).toBe(2);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(2);
+    expect(expectSuccess(results[0]).requestedKeys).toBe(2);
 
     // Verify output file was written
     const output = readJson(join(dir, "fr.json"));
@@ -128,8 +141,8 @@ describe("translate", () => {
       geminiApiKey: "fake-key",
     });
 
-    expect(results[0].translatedKeys).toBe(1);
-    expect(results[0].requestedKeys).toBe(1);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(1);
+    expect(expectSuccess(results[0]).requestedKeys).toBe(1);
 
     // Verify mock was called with only the new entry
     expect(mockTranslateFn).toHaveBeenCalledOnce();
@@ -158,7 +171,7 @@ describe("translate", () => {
     });
 
     expect(results[0].success).toBe(true);
-    expect(results[0].translatedKeys).toBe(0);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(0);
     expect(mockTranslateFn).not.toHaveBeenCalled();
   });
 
@@ -207,7 +220,7 @@ describe("translate", () => {
       geminiApiKey: "fake-key",
     });
 
-    expect(results[0].translatedKeys).toBe(1);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(1);
     expect(mockTranslateFn).toHaveBeenCalledOnce();
     expect(mockTranslateFn.mock.calls[0][0][0].key).toBe("submit");
 
@@ -239,7 +252,7 @@ describe("translate", () => {
       geminiApiKey: "fake-key",
     });
 
-    expect(results[0].translatedKeys).toBe(1);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(1);
     expect(readJson(join(dir, "fr.json")).submit).toBe("Déclarer");
   });
 
@@ -264,9 +277,9 @@ describe("translate", () => {
     });
 
     // The dropped key is reported, not counted as translated
-    expect(results[0].requestedKeys).toBe(1);
-    expect(results[0].translatedKeys).toBe(0);
-    expect(results[0].droppedKeys).toEqual(["submit"]);
+    expect(expectSuccess(results[0]).requestedKeys).toBe(1);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(0);
+    expect(expectSuccess(results[0]).droppedKeys).toEqual(["submit"]);
 
     // Old translation is kept, and the manifest still records the old hash,
     // so the key is re-queued on the next run instead of marked up to date
@@ -295,7 +308,7 @@ describe("translate", () => {
       geminiApiKey: "fake-key",
     });
 
-    expect(results[0].requestedKeys).toBe(0);
+    expect(expectSuccess(results[0]).requestedKeys).toBe(0);
     expect(mockTranslateFn).not.toHaveBeenCalled();
   });
 
@@ -314,7 +327,7 @@ describe("translate", () => {
       geminiApiKey: "fake-key",
     });
 
-    expect(results[0].translatedKeys).toBe(0);
+    expect(expectSuccess(results[0]).translatedKeys).toBe(0);
     expect(mockTranslateFn).not.toHaveBeenCalled();
 
     const manifest = readJson<HashManifest>(join(dir, HASH_MANIFEST_FILE));

@@ -239,7 +239,7 @@ Test the internal logic without calling the Gemini API. Gemini is mocked — the
 | `translate.test.ts` | removes stale keys not in source | `translate()` cleans up keys deleted from `en-US.json` |
 | `translate.test.ts` | re-translates keys whose source value changed | hash manifest triggers re-translation when English copy is edited |
 | `translate.test.ts` | re-translates keys whose context changed | sharpening a key's context re-translates it, since context is sent to Gemini too |
-| `translate.test.ts` | does not re-translate when an edit leaves the prompt unchanged | the hash is of the prompt block, so a no-op edit (e.g. adding an empty context) costs nothing |
+| `translate.test.ts` | does not re-translate when an edit leaves the prompt unchanged | the hash shares the prompt's normalization, so a no-op edit (e.g. adding an empty context) costs nothing |
 | `translate.test.ts` | keeps the stale hash when the translator omits a requested key | a dropped key is retried next run instead of being recorded as up to date |
 | `translate.test.ts` | trusts existing translations without manifest and backfills hashes | pre-manifest translation files don't cause a re-translation storm |
 | `translate.test.ts` | handles multiple target languages | `translate()` produces output files for each language |

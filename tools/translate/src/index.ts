@@ -38,12 +38,10 @@ async function main() {
 
     console.log(`Successful: ${successful.length}/${results.length}`);
     for (const r of successful) {
-      if (r.totalKeys !== undefined && r.requestedKeys !== undefined) {
-        const unchanged = r.totalKeys - r.requestedKeys;
-        console.log(`  ${r.language}: ${r.translatedKeys} translated, ${unchanged} unchanged (${r.totalKeys} total)`);
-        if (r.droppedKeys && r.droppedKeys.length > 0) {
-          console.log(`    left untranslated, retried next run: ${r.droppedKeys.join(", ")}`);
-        }
+      const unchanged = r.totalKeys - r.requestedKeys;
+      console.log(`  ${r.language}: ${r.translatedKeys} translated, ${unchanged} unchanged (${r.totalKeys} total)`);
+      if (r.droppedKeys.length > 0) {
+        console.warn(`    the translator returned nothing for ${r.droppedKeys.length} key(s), left untranslated: ${r.droppedKeys.join(", ")}`);
       }
     }
     if (failed.length > 0) {
@@ -53,7 +51,7 @@ async function main() {
     }
 
     const totalDropped = successful.reduce(
-      (sum, r) => sum + (r.droppedKeys?.length ?? 0),
+      (sum, r) => sum + r.droppedKeys.length,
       0
     );
     console.log(
