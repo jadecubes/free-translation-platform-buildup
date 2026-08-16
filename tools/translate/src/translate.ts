@@ -142,7 +142,6 @@ export async function translate(
 
       results.push({
         language,
-        translations: mergedMap,
         success: true,
         totalKeys,
         requestedKeys,
@@ -156,7 +155,6 @@ export async function translate(
 
       results.push({
         language,
-        translations: {},
         success: false,
         error: errorMessage,
       });

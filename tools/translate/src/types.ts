@@ -31,7 +31,6 @@ export interface TranslateOptions {
 
 export interface SuccessfulTranslation {
   language: string;
-  translations: TranslationMap;
   success: true;
   totalKeys: number;
   /** Keys sent to the translator this run (new key, or source changed) */
@@ -44,7 +43,6 @@ export interface SuccessfulTranslation {
 
 export interface FailedTranslation {
   language: string;
-  translations: TranslationMap;
   success: false;
   error: string;
 }
