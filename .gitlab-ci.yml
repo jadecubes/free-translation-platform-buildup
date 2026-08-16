@@ -26,6 +26,12 @@ translate:
     - git config --global user.email "translator@ci.local"
     - git config --global user.name "Translation Bot"
   script:
+    # Fail fast on missing push credentials — before spending Gemini API calls
+    - |
+      if [ -z "$PROJECT_TOKEN" ]; then
+        echo "Missing PROJECT_TOKEN CI variable (project access token with write_repository scope) — required to push the translation branch"
+        exit 1
+      fi
     - cd tools/translate
     - npm ci
     # Set PROJECT_ROOT so translate tool finds locales/ directory
@@ -39,10 +45,6 @@ translate:
       if git diff --cached --quiet; then
         echo "No translation changes detected"
       else
-        if [ -z "$PROJECT_TOKEN" ]; then
-          echo "Missing PROJECT_TOKEN CI variable (project access token with write_repository scope) — required to push the translation branch"
-          exit 1
-        fi
         BRANCH_NAME="translate/$(date +%Y%m%d-%H%M%S)"
         echo "Creating branch $BRANCH_NAME..."
         git checkout -b "$BRANCH_NAME"

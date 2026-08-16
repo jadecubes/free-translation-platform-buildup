@@ -41,9 +41,12 @@ export async function translate(
   }
 
   const manifestFile = join(outputDir, HASH_MANIFEST_FILE);
-  const manifest: HashManifest = existsSync(manifestFile)
-    ? readJsonFile<HashManifest>(manifestFile)
-    : {};
+  const manifest = readJsonFileIfExists<HashManifest>(manifestFile, {});
+
+  // Source-value hashes are language-independent — compute once, not per language
+  const sourceHashes: { [key: string]: string } = Object.fromEntries(
+    entries.map((entry) => [entry.key, hashSourceValue(entry.value)])
+  );
 
   // Initialize Gemini translator
   const translator = new GeminiTranslator(geminiApiKey);
@@ -57,9 +60,8 @@ export async function translate(
     try {
       // Read existing translations for this language
       const outputFile = join(outputDir, `${language}.json`);
-      let existingMap: TranslationMap = {};
-      if (existsSync(outputFile)) {
-        existingMap = readJsonFile<TranslationMap>(outputFile);
+      const existingMap = readJsonFileIfExists<TranslationMap>(outputFile, {});
+      if (Object.keys(existingMap).length > 0) {
         console.log(`  Found existing translations: ${Object.keys(existingMap).length} keys`);
       }
 
@@ -70,25 +72,23 @@ export async function translate(
       const entriesToTranslate = entries.filter((entry) => {
         if (!(entry.key in existingMap)) return true;
         const lastHash = langHashes[entry.key];
-        return lastHash !== undefined && lastHash !== hashSourceValue(entry.value);
+        return lastHash !== undefined && lastHash !== sourceHashes[entry.key];
       });
 
       const totalKeys = entries.length;
-      const existingKeys = totalKeys - entriesToTranslate.length;
-      const newKeyCount = entriesToTranslate.length;
+      const translatedKeys = entriesToTranslate.length;
+      const skippedKeys = totalKeys - translatedKeys;
 
-      let mergedMap: TranslationMap;
-
+      let newTranslations: TranslationMap = {};
       if (entriesToTranslate.length === 0) {
         console.log(`  No new or changed keys — skipping translation for ${language}`);
-        mergedMap = { ...existingMap };
       } else {
-        console.log(`  Translating ${entriesToTranslate.length} new/updated key(s) (${existingKeys} existing kept)...`);
-        const newTranslations = await translator.translate(entriesToTranslate, language);
-
-        // Merge: existing translations + new translations (new overrides if overlap)
-        mergedMap = { ...existingMap, ...newTranslations };
+        console.log(`  Translating ${translatedKeys} new/updated key(s) (${skippedKeys} unchanged kept)...`);
+        newTranslations = await translator.translate(entriesToTranslate, language);
       }
+
+      // Merge: existing translations + new translations (new overrides if overlap)
+      const mergedMap: TranslationMap = { ...existingMap, ...newTranslations };
 
       // Remove keys that no longer exist in source
       for (const key of Object.keys(mergedMap)) {
@@ -100,8 +100,17 @@ export async function translate(
       writeJsonFile(outputFile, mergedMap);
       console.log(`  Saved: ${outputFile}`);
 
+      // Record what each key was actually translated from: keys just returned by
+      // the translator (or trusted pre-manifest keys with no record) get the
+      // current source hash; anything else keeps its old hash, so a key the
+      // translator failed to return stays flagged as stale and is retried next run
       manifest[language] = Object.fromEntries(
-        Object.keys(mergedMap).map((key) => [key, hashSourceValue(sourceMap[key].value)])
+        Object.keys(mergedMap).map((key) => [
+          key,
+          key in newTranslations || !(key in langHashes)
+            ? sourceHashes[key]
+            : langHashes[key],
+        ])
       );
 
       results.push({
@@ -109,8 +118,8 @@ export async function translate(
         translations: mergedMap,
         success: true,
         totalKeys,
-        newKeys: newKeyCount,
-        existingKeys,
+        translatedKeys,
+        skippedKeys,
       });
     } catch (error) {
       const errorMessage =
@@ -134,6 +143,10 @@ export async function translate(
 function readJsonFile<T>(filePath: string): T {
   const content = readFileSync(filePath, "utf-8");
   return JSON.parse(content);
+}
+
+function readJsonFileIfExists<T>(filePath: string, fallback: T): T {
+  return existsSync(filePath) ? readJsonFile<T>(filePath) : fallback;
 }
 
 function writeJsonFile(filePath: string, data: unknown): void {

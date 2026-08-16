@@ -35,6 +35,8 @@ export interface TranslationResult {
   success: boolean;
   error?: string;
   totalKeys?: number;
-  newKeys?: number;
-  existingKeys?: number;
+  /** Keys sent to the translator this run (new key, or source value changed) */
+  translatedKeys?: number;
+  /** Keys kept as-is (already translated from an unchanged source value) */
+  skippedKeys?: number;
 }
