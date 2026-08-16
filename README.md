@@ -63,6 +63,15 @@ Open **Build > Pipelines**:
 
 A Merge Request with the translated files appears when the job completes. Review and merge it.
 
+**Read the job log, not just the pipeline badge.** The `translate` job is `allow_failure: true`, so the pipeline stays green even when the job fails — a missing `PROJECT_TOKEN`, a Gemini error, or a language that failed outright all show up only on the job itself.
+
+Two cases where the MR is opened but is not the whole story:
+
+| In the job log | What it means |
+|---|---|
+| `the translator returned nothing for N key(s), left untranslated: …` | Gemini dropped keys from its response. Those keys keep their previous hash, so the next run re-sends them — but this MR's locale files are missing them. Merge it and re-run, or re-run first and merge once. |
+| `Translation completed with N key(s) left untranslated` | Same condition, summarized at the end of the run. |
+
 ---
 
 ## Translation Files
@@ -355,6 +364,25 @@ docker exec -it gitlab-runner gitlab-runner register
 cd tools/translate
 npm run translate
 ```
+
+The pipeline stays green when this job fails (`allow_failure: true`) — open the job to see why.
+
+### An edited English string didn't get re-translated
+
+Change detection reads `locales/.translation-hashes.json`. If that file is missing from the repo, every already-translated key is trusted and backfilled instead, so copy edits stop reaching Gemini and nothing in the log looks wrong. Confirm it is committed alongside the locale files. The job log prints `No hash record for N existing key(s) — trusting them and backfilling` when it is working from an absent or incomplete manifest.
+
+### Job fails immediately with "Missing PROJECT_TOKEN"
+
+The push to the translation branch needs a project access token with `write_repository` (Quick Start, Step 3, item 5). The job checks for it before calling Gemini, so this costs no API credit.
+
+---
+
+## Before pointing this at a real GitLab
+
+This repo is a self-contained demo running GitLab locally with a self-signed certificate. Two things are set up for that and should change first:
+
+- **TLS verification is off for the two credential-bearing CI calls** — `git -c http.sslVerify=false push` and `curl --insecure` in `.gitlab-ci.yml`. The push URL embeds `PROJECT_TOKEN`. Against a real instance, use the instance CA (`git config http.sslCAInfo` / `curl --cacert`) or gate the insecure flags behind a variable.
+- **The push and MR-creation path has no automated coverage** — the unit tests mock the Gemini client, and the e2e tests exercise translation only. Do one manual run of the `translate` job and confirm the branch and MR appear before relying on it.
 
 ---
 
