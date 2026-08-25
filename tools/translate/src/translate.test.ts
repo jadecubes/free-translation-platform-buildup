@@ -289,6 +289,32 @@ describe("translate", () => {
     expect(manifest.fr.submit).toBe(hashSourceEntry({ key: "submit", value: "Submit", context: "Button" }));
   });
 
+  it("rejects a translation that mangles a placeholder and retries it next run", async () => {
+    const dir = createTempDir();
+    const sourceFile = writeJson(dir, "en-US.json", {
+      greet: { value: "Hello, {name}!", context: "Greeting" },
+    });
+
+    // The model translated the placeholder itself — the classic failure
+    mockTranslateFn.mockResolvedValueOnce({ greet: "Bonjour, {nom} !" });
+
+    const results = await translate({
+      sourceFile,
+      outputDir: dir,
+      targetLanguages: ["fr"],
+      geminiApiKey: "fake-key",
+    });
+
+    // Rejected, so reported as dropped rather than written to disk
+    expect(expectSuccess(results[0]).droppedKeys).toEqual(["greet"]);
+    const output = readJson(join(dir, "fr.json"));
+    expect(output).not.toHaveProperty("greet");
+
+    // No hash recorded: the key stays stale and is requested again next run
+    const manifest = readJson<HashManifest>(join(dir, HASH_MANIFEST_FILE));
+    expect(manifest.fr).not.toHaveProperty("greet");
+  });
+
   it("does not re-translate when an edit leaves the prompt unchanged", async () => {
     const dir = createTempDir();
     // Adding an empty context reads as "no context" in the prompt, so the key
