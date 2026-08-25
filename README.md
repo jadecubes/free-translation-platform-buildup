@@ -2,528 +2,233 @@
 
 ![Unit Tests](https://github.com/jadecubes/free-translation-platform-buildup/actions/workflows/test.yml/badge.svg?branch=main)
 
-A self-hosted translation platform using GitLab CI and Gemini AI. Trigger context-aware translations with one click in GitLab, review via Merge Requests.
+A small, self-hosted demo that translates JSON locale files with Gemini and opens a GitLab Merge Request for human review.
 
-## How It Works
-
-```
-Push en-US.json → run the manual "translate" CI job (pipeline view or Run pipeline form)
-→ Gemini API → Merge Request with fr.json, ja.json, etc.
+```text
+Push en-US.json → run the manual translate job → Gemini → review the generated MR
 ```
 
-**Key features:**
-- Context-aware translations using Gemini AI
-- No extra UI or server — GitLab's built-in manual job button is the trigger
-- Only translates new keys and keys whose English text changed (cost-efficient)
-- Validates model output — placeholder and type checks — before anything is written
-- Creates Merge Requests for review before merging
+The translator sends only new keys and keys whose English value or context changed. It validates returned values and placeholders before writing them.
 
----
+## Requirements
+
+- Docker with Docker Compose
+- At least 4 GB of available memory for the local GitLab instance
+- A Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+
+The bundled GitLab instance uses HTTP and is intended only for local development. Do not expose it to an untrusted network.
 
 ## Quick Start
 
-### Step 1. Configure environment
+### 1. Start GitLab
 
 ```bash
+git clone https://github.com/jadecubes/free-translation-platform-buildup.git
+cd free-translation-platform-buildup
 cp .env.template .env
-nano .env  # Set GITLAB_ROOT_PASSWORD and GEMINI_API_KEY
 ```
 
-### Step 2. Start the services
+Set a strong `GITLAB_ROOT_PASSWORD` in `.env`, then make `gitlab.local` resolve to your machine:
+
+```text
+127.0.0.1 gitlab.local
+```
+
+Add that line to `/etc/hosts` on macOS/Linux or the Windows hosts file, then run:
 
 ```bash
 ./setup.sh
 ```
 
-This starts GitLab and the runner, then waits until GitLab is ready (2–3 minutes).
+Open `http://gitlab.local:8081` and sign in as `root`.
 
-### Step 3. One-time GitLab setup
+### 2. Create a GitLab project
 
-Do this once after `setup.sh` reports "GitLab is ready":
+Create a blank project, for example `translation-demo`. Do not initialize it with a README because this repository already has a `main` branch.
 
-1. Open `https://gitlab.local:8081` — login as `root` with your password
-2. Create a new project (e.g. `translation-demo`)
-3. Register the runner: **Admin > CI/CD > Runners**, then:
-   ```bash
-   docker exec -it gitlab-runner gitlab-runner register
-   # URL: https://gitlab.local:8081 | Executor: docker | Image: node:20-alpine
-   ```
-4. Add `GEMINI_API_KEY` as a CI/CD variable: **Project > Settings > CI/CD > Variables** (Protected: No, Masked: Yes)
-5. Create a project access token for the bot to push branches: **Project > Settings > Access tokens** — role `Developer`, scope `write_repository`. Add it as CI/CD variable `PROJECT_TOKEN` (Masked: Yes)
-6. Push your files:
-   ```bash
-   git push origin main
-   ```
+### 3. Register the runner
 
-### Translate
+In the new project, open **Settings > CI/CD > Runners**, create a project runner, and copy its authentication token (`glrt-...`). Register it with:
 
-Open **Build > Pipelines**:
+```bash
+docker exec -it gitlab-runner gitlab-runner register \
+  --non-interactive \
+  --url "http://gitlab.local:8081" \
+  --token "glrt-your-runner-token" \
+  --executor "docker" \
+  --docker-image "node:20-alpine" \
+  --docker-network-mode "translation-network" \
+  --description "translation-runner"
+```
 
-- **Latest push pipeline** → click the ▶ `translate` manual job, or
-- **Run pipeline** → optionally override `TARGET_LANGUAGES` (e.g. `fr,ja`) → the `translate` job appears as a manual action
+The network option is required: build and helper containers must be able to resolve the GitLab service as `gitlab.local`.
 
-A Merge Request with the translated files appears when the job completes. Review and merge it.
+### 4. Add CI/CD variables
 
-**Read the job log, not just the pipeline badge.** The `translate` job is `allow_failure: true`, so the pipeline stays green even when the job fails — a missing `PROJECT_TOKEN`, a Gemini error, or a language that failed outright all show up only on the job itself.
+Open **Settings > CI/CD > Variables** and add:
 
-Two cases where the MR is opened but is not the whole story:
+| Variable | Value | Options |
+|---|---|---|
+| `GEMINI_API_KEY` | Your Gemini API key | Masked |
+| `PROJECT_TOKEN` | Project access token described below | Masked |
 
-| In the job log | What it means |
-|---|---|
-| `the translator returned nothing for N key(s), left untranslated: …` | Gemini dropped keys from its response. Those keys keep their previous hash, so the next run re-sends them — but this MR's locale files are missing them. Merge it and re-run, or re-run first and merge once. |
-| `Translation completed with N key(s) left untranslated` | Same condition, summarized at the end of the run. |
+Create `PROJECT_TOKEN` under **Settings > Access tokens** with role `Developer` and scope `write_repository`. The translation job uses it to push a branch and create the MR through Git push options.
 
----
+Optional variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TARGET_LANGUAGES` | `fr,ja,zh-Hant-HK` | Comma-separated target language codes |
+| `GEMINI_MODEL` | `gemini-3.6-flash` | Supported Gemini model to call |
+
+### 5. Push this repository to local GitLab
+
+Copy the HTTP project URL from GitLab, then add it as a separate remote:
+
+```bash
+git remote add local-gitlab http://gitlab.local:8081/root/translation-demo.git
+git push -u local-gitlab main
+```
+
+Using a separate remote avoids accidentally pushing back to the GitHub repository.
+
+### 6. Translate
+
+Open **Build > Pipelines** and run the manual `translate` job. You can also use **Run pipeline** and override `TARGET_LANGUAGES` before starting the job.
+
+When translations change, the job pushes a `translate/<timestamp>` branch and opens an MR against the branch that ran the pipeline. Review the locale diff before merging.
+
+The job is intentionally `allow_failure: true`, so inspect its log if translation does not produce an MR.
 
 ## Translation Files
 
-Generated by your project's i18n scanner, which extracts translation keys and their context annotations from the source code.
-
-### `en-US.json` - Source File
-
-Each key maps to a `{ value, context }` object:
+`locales/en-US.json` is the source of truth. Each key has a value and optional usage context:
 
 ```json
 {
-  "submit": { "value": "Submit", "context": "Primary action button on forms" },
-  "cancel": { "value": "Cancel", "context": "Button to close dialogs without saving" },
-  "errorTimeout": { "value": "Connection timed out. Please try again.", "context": "Error message when API fails, tone should be apologetic" },
-  "itemCount": { "value": "{count} items", "context": "Shows item count in cart, {count} is a placeholder" }
+  "submit": {
+    "value": "Submit",
+    "context": "Primary action button on forms"
+  },
+  "itemCount": {
+    "value": "{count} items",
+    "context": "Cart item count; {count} is a placeholder"
+  }
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `value` | The source English string to translate |
-| `context` | Description of how/where the string is used — helps Gemini pick the right translation |
+The generated `locales/{language}.json` files are flat key/value maps suitable for normal i18n libraries:
 
-**Context is optional** — keys without context still get translated, just with less accuracy.
-
-### What gets (re)translated
-
-A key is sent to Gemini when it is **new** (missing from the target file) or its **English value or context changed** since it was last translated. Change detection uses `locales/.translation-hashes.json`, a generated manifest recording the source hash (English value + context) each key was last translated from — commit it along with the locale files. Keys present in a target file but absent from the manifest (files predating it) are trusted as-is and only get their hash backfilled.
-
-What comes back from Gemini is validated before it is written: values must be non-empty strings, and the placeholder names in each translation must match the source exactly (`{name}`, `{{name}}`, and ICU argument names). A key that fails — or that Gemini fails to return — is logged, left untranslated, and requested again on the next run; it is never written to disk or marked up to date.
-
-### Missing Context Warnings
-
-When CI detects keys without context, it logs warnings:
-
-```
---- Missing Context Warning ---
-The following 2 keys have no context:
-  - newKey
-  - anotherKey
-Add context to your i18n annotations for better translation quality.
+```json
+{
+  "submit": "Envoyer",
+  "itemCount": "{count} articles"
+}
 ```
 
-Translation still proceeds (soft mode).
+`locales/.translation-hashes.json` records the English value and context each translation came from. Commit it with the generated locale files so copy or context changes are translated again.
 
-### Using the output at runtime
+Model output is accepted only when:
 
-The generated files are plain flat JSON for any i18n library. Two conventions the consuming app should follow: fall back to the `en-US` value when a key is missing from a target file (a key can be legitimately absent — rejected by validation and awaiting the next run), and never render the key name itself. Make the fallback loud in development and silent in production.
+- The requested key is present.
+- Its value is a non-empty string.
+- Placeholder names match the source for `{name}`, `{{name}}`, and ICU arguments.
 
----
+Rejected or omitted keys keep their old hash and are retried on the next run. Consuming applications should fall back to `en-US` when a target key is absent.
 
-## Configuration
+## Run Locally
 
-### Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GEMINI_API_KEY` | Your Gemini API key | Yes |
-| `TARGET_LANGUAGES` | Languages to translate to (e.g., `fr,ja,zh-Hant-HK`) | Yes |
-| `GITLAB_ROOT_PASSWORD` | GitLab root password | Yes |
-| `PROJECT_TOKEN` | Project access token (`write_repository`) used by CI to push translation branches | Yes (CI variable) |
-
-### Getting a Gemini API Key
-
-1. Go to https://aistudio.google.com/app/apikey
-2. Create a new API key
-3. Add to `.env` file
-
----
-
-## Project Structure
-
-```
-.
-├── docker-compose.yml      # GitLab + GitLab Runner
-├── .env.template           # Configuration template
-├── .gitlab-ci.yml          # CI pipeline for translation
-├── setup.sh                # Initial setup script
-├── .github/workflows/
-│   └── test.yml            # GitHub Actions: runs tests on every push/PR
-├── locales/
-│   ├── en-US.json          # Source strings with context ({ value, context } per key)
-│   ├── .translation-hashes.json  # Generated: source hash (English value + context) each key was last translated from
-│   ├── fr.json             # Generated: French translations
-│   ├── ja.json             # Generated: Japanese translations
-│   └── zh-Hant-HK.json     # Generated: Chinese (Traditional) translations
-└── tools/
-    └── translate/          # TypeScript translation tool
-        ├── package.json
-        ├── tsconfig.json         # Typecheck config — covers src/ and e2e/, so `npm test` catches type rot in the suite CI can't run
-        ├── tsconfig.build.json   # Build config — emits src/ to dist/
-        ├── vitest.config.ts      # Unit test config (src/**/*.test.ts)
-        ├── vitest.e2e.config.ts  # E2E test config (e2e/**/*.test.ts)
-        ├── src/
-        │   ├── index.ts          # Entry point
-        │   ├── translate.ts      # Core logic
-        │   ├── gemini.ts         # Gemini API wrapper
-        │   ├── types.ts          # TypeScript types
-        │   ├── gemini.test.ts    # Unit tests for prompt/response parsing
-        │   └── translate.test.ts # Unit tests for translation logic
-        └── e2e/
-            └── translation-flow.test.ts  # E2E test (requires GEMINI_API_KEY)
-```
-
-### File Descriptions
-
-| File | Function |
-|------|----------|
-| `docker-compose.yml` | Defines the Docker services: GitLab CE (git hosting + CI engine) and GitLab Runner (executes CI jobs) |
-| `.env.template` | Template for environment variables: `GITLAB_ROOT_PASSWORD`, `GEMINI_API_KEY`, `TARGET_LANGUAGES` |
-| `.gitlab-ci.yml` | CI pipeline definition — `test` job runs unit tests on every push, `translate` manual job runs the translation tool and creates a Merge Request |
-| `setup.sh` | One-time setup script: copies `.env.template`, validates API key, starts Docker containers |
-| `locales/en-US.json` | Source English strings with context (`{ value, context }` per key) — the single source of truth for all translations |
-| `locales/{lang}.json` | Generated translation files (e.g. `fr.json`, `ja.json`) — output of the translation pipeline |
-| `locales/.translation-hashes.json` | Generated manifest — source hash (English value + context) each key was last translated from, drives re-translation when English copy or context changes |
-| `tools/translate/src/index.ts` | CLI entry point — reads environment variables, resolves file paths, calls `translate()`, prints summary |
-| `tools/translate/src/translate.ts` | Core translation orchestrator — reads source, existing translations and hash manifest, sends only new/changed keys to Gemini, merges results, writes output files |
-| `tools/translate/src/gemini.ts` | Gemini API wrapper — builds translation prompts with key/value/context, calls `generateContent()`, parses JSON response |
-| `tools/translate/src/types.ts` | TypeScript type definitions: `SourceEntry`, `SourceMap`, `TranslationMap`, `MergedEntry`, `TranslateOptions`, `TranslationResult` |
-| `tools/translate/src/gemini.test.ts` | Unit tests for `buildPrompt()` and `parseResponse()` — verifies prompt construction, JSON parsing, and markdown fence stripping |
-| `tools/translate/src/translate.test.ts` | Unit tests for `parseSourceMap()` and `translate()` — verifies differential translation, stale key removal, and merge logic (mocked Gemini) |
-| `tools/translate/e2e/translation-flow.test.ts` | E2E test — calls real Gemini API via the actual `translate()` function; skipped automatically when `GEMINI_API_KEY` is not set |
-| `.github/workflows/test.yml` | GitHub Actions workflow — runs unit tests on every push/PR to `main` |
-
----
-
-## Commands
-
-```bash
-# Start GitLab
-docker compose up -d
-
-# Stop GitLab
-docker compose down
-
-# View GitLab logs
-docker logs -f gitlab
-
-# View Runner logs
-docker logs -f gitlab-runner
-
-# Run unit tests (no API key needed)
-cd tools/translate && npm ci && npm test
-
-# Run e2e tests (proves Gemini flow works, requires API key)
-cd tools/translate && npm ci && GEMINI_API_KEY=your_key npm run test:e2e
-
-# Run translation locally
-cd tools/translate && npm ci
-GEMINI_API_KEY=your_key TARGET_LANGUAGES=fr,ja npm run translate
-```
-
----
-
-## Tests
-
-The project has two levels of tests: **unit tests** (no API key, run fast with mocked Gemini) and **e2e tests** (require API key, call real Gemini API).
-
-### Unit Tests (`tools/translate/src/`)
-
-Test the internal logic without calling the Gemini API. Gemini is mocked — these run in ~150ms.
-
-The test names are the documentation — `npx vitest run` lists them all. What each file covers:
-
-| File | Tests | Covers |
-|------|-------|--------|
-| `gemini.test.ts` | 8 | `buildPrompt()` includes key/value/context; `parseResponse()` strips markdown fences, trims, throws clearly on invalid JSON |
-| `validate.test.ts` | 10 | `extractPlaceholders()` for `{name}`, `{{name}}`, ICU argument names; `validateTranslations()` rejects mangled, missing, or invented placeholders and non-string or empty values, and discards unrequested keys |
-| `translate.test.ts` | 14 | Differential logic with a mocked Gemini: new/changed/unchanged keys, hash-manifest round-trip, backfill for pre-manifest files, stale-key removal, dropped and rejected keys kept stale and retried, multiple languages |
-
-### E2E Tests (`tools/translate/e2e/`)
-
-Call the **real `translate()` function** with the **real Gemini API**. These prove the actual pipeline works end-to-end. Not run in CI — run manually when you want to verify the Gemini integration:
+The translation tool can run without GitLab:
 
 ```bash
 cd tools/translate
-GEMINI_API_KEY=your_key npm run test:e2e
+npm ci
+PROJECT_ROOT=../.. GEMINI_API_KEY=your-key TARGET_LANGUAGES=fr,ja npm run translate
 ```
 
-| Test | What it proves |
-|------|----------------|
-| translates all keys from source file to French | Full pipeline: `translate()` reads `en-US.json` → calls Gemini → writes `fr.json` with valid translations |
-| preserves {name} placeholder | `{name}` placeholder survives the Gemini round-trip intact |
-| preserves ICU plural format | `{count, plural, one {...} other {...}}` ICU syntax survives translation |
-| only translates new keys (differential) | Existing `fr.json` with "submit" is kept; only missing "cancel" is sent to Gemini |
-| removes stale keys no longer in source | Key removed from `en-US.json` is deleted from `fr.json` output |
-| translates to multiple languages | `translate()` produces both `fr.json` and `ja.json`; Japanese contains CJK characters |
+`PROJECT_ROOT=../..` points the nested tool back to this repository's `locales/` directory.
 
-### E2E Test Flow
+## Development
 
-```mermaid
-sequenceDiagram
-    participant Test as tools/translate/e2e/translation-flow.test.ts
-    participant Translate as tools/translate/src/translate.ts
-    participant Gemini as tools/translate/src/gemini.ts
-    participant API as Gemini API (real)
-    participant FS as File System (temp dir)
-
-    Note over Test: Setup: create temp dir with en-US.json
-
-    Test->>FS: Write en-US.json (source)
-    Test->>FS: Write fr.json (existing translations, if testing differential)
-
-    Test->>Translate: translate({ sourceFile, outputDir, targetLanguages, geminiApiKey })
-
-    Translate->>FS: Read en-US.json
-    Translate->>Translate: parseSourceMap() → extract entries
-    Translate->>FS: Read existing fr.json (if exists)
-    Translate->>Translate: Compare keys → find new/missing keys
-
-    alt New keys found
-        Translate->>Gemini: translator.translate(newEntries, "fr")
-        Gemini->>API: POST generateContent(prompt)
-        API-->>Gemini: JSON response
-        Gemini->>Gemini: parseResponse() → strip fences, parse JSON
-        Gemini-->>Translate: { key: "translated value" }
-    end
-
-    Translate->>Translate: Merge existing + new translations
-    Translate->>Translate: Remove stale keys not in source
-    Translate->>FS: Write fr.json (merged output)
-    Translate-->>Test: results[]
-
-    Note over Test: Assertions
-
-    Test->>FS: Read fr.json output
-    Test->>Test: Verify success, key count, content
-    Test->>Test: Verify placeholders preserved
-    Test->>Test: Verify stale keys removed
+```bash
+cd tools/translate
+npm ci
+npm test
 ```
 
----
+`npm test` runs the TypeScript typecheck and unit suite. The tests mock the external Gemini request.
 
-## Memory Usage
+Run the real API integration suite manually:
 
-| Service | Memory | Notes |
-|---------|--------|-------|
-| GitLab | ~1.5-2GB | Main service |
-| GitLab Runner | ~128MB | Runs CI jobs |
-| **Total** | **~2GB** | Much lighter than before |
+```bash
+GEMINI_API_KEY=your-key npm run test:e2e
+```
 
----
+GitHub Actions runs the unit suite on changes under `tools/translate/`. The real Gemini suite is not run in CI because it consumes API quota.
 
-## GitHub Actions (Auto-Test on Every Commit)
+## Operations
 
-The project includes a GitHub Actions workflow (`.github/workflows/test.yml`) that runs automatically on every push and pull request to `main`.
+```bash
+# Start or stop GitLab
+docker compose up -d
+docker compose down
 
-**What runs:**
-- **Unit tests** — always run (no API key needed), validates translation logic
+# Follow service logs
+docker logs -f gitlab
+docker logs -f gitlab-runner
 
-E2E tests are not run in CI. Run them manually — see [E2E Tests](#e2e-tests-toolstranslatee2e) above.
+# Check registered runners
+docker exec gitlab-runner gitlab-runner list
+```
 
----
+Persistent GitLab and runner data is stored in ignored `gitlab-data/` and `gitlab-runner-config/` directories.
 
 ## Troubleshooting
 
-### GitLab not starting
+### GitLab does not become ready
+
+GitLab can take several minutes on its first start. Check:
 
 ```bash
 docker logs gitlab
-# Wait for "Reconfigured" messages (2-3 minutes)
 ```
 
-### Runner not picking up jobs
+Also confirm `gitlab.local` resolves to `127.0.0.1` on the host.
+
+### Runner cannot clone the project
+
+Confirm the runner was registered with `--docker-network-mode translation-network`:
 
 ```bash
-# Check runner status
+docker network inspect translation-network
 docker exec gitlab-runner gitlab-runner list
-
-# Re-register if needed
-docker exec -it gitlab-runner gitlab-runner register
 ```
 
-### Translation failing
+If it was registered without that option, unregister it in GitLab, remove its entry from `gitlab-runner-config/config.toml`, and register it again.
 
-```bash
-# Check CI job logs in GitLab UI
-# Or test locally:
-cd tools/translate
-npm run translate
-```
+### The job reports `Missing PROJECT_TOKEN`
 
-The pipeline stays green when this job fails (`allow_failure: true`) — open the job to see why.
+Add a project access token with role `Developer` and scope `write_repository` as the masked `PROJECT_TOKEN` CI/CD variable. The check happens before Gemini is called, so this failure does not consume API quota.
 
-### An edited English string didn't get re-translated
+### An English edit is not translated again
 
-Change detection reads `locales/.translation-hashes.json`. If that file is missing from the repo, every already-translated key is trusted and backfilled instead, so copy edits stop reaching Gemini and nothing in the log looks wrong. Confirm it is committed alongside the locale files. The job log prints `No hash record for N existing key(s) — trusting them and backfilling` when it is working from an absent or incomplete manifest.
-
-### Job fails immediately with "Missing PROJECT_TOKEN"
-
-The push to the translation branch needs a project access token with `write_repository` (Quick Start, Step 3, item 5). The job checks for it before calling Gemini, so this costs no API credit.
-
----
+Confirm `locales/.translation-hashes.json` is committed. Without the manifest, existing translations are trusted and their hashes are backfilled.
 
 ## Limitations
 
-Known and deliberate — the MR review step is the backstop for all of them.
+- Human corrections are overwritten if that key's English value or context later changes.
+- Validation checks output shape and placeholders, not linguistic quality.
+- printf-style placeholders such as `%s` and `%d` are not validated.
+- Requests have no retry/backoff and are sent as one prompt per language, so very large batches may exceed model output limits.
+- The bundled GitLab uses local HTTP. Use your organization's HTTPS GitLab instance for real deployments.
 
-- **A human correction survives only until the English changes.** Fixing a translation in the MR works, and the fix is kept (the hash matches, so the key is skipped). But there is no "reviewed" flag: the next edit to that key's English value or context re-translates it and overwrites the correction without warning.
-- **Validation checks form, not meaning.** Placeholders and value types are enforced; wrong word choice, wrong tone, or wrong formality sail through. The MR diff is the only quality gate.
-- **Only `{name}`, `{{name}}` and ICU argument names are checked.** printf-style placeholders (`%s`, `%d`) are invisible to the validator.
-- **No retry or backoff.** A rate limit or transient API error fails that language for the run (other languages are unaffected). Re-running the job retries everything still stale.
-- **One prompt per language.** A very large batch of new keys could exceed the model's output limit; the truncated JSON fails to parse and the language fails that run. No chunking.
+## Project Layout
 
-## Before pointing this at a real GitLab
-
-This repo is a self-contained demo running GitLab locally with a self-signed certificate. Two things are set up for that and should change first:
-
-- **TLS verification is off for the two credential-bearing CI calls** — `git -c http.sslVerify=false push` and `curl --insecure` in `.gitlab-ci.yml`. The push URL embeds `PROJECT_TOKEN`. Against a real instance, use the instance CA (`git config http.sslCAInfo` / `curl --cacert`) or gate the insecure flags behind a variable.
-- **The push and MR-creation path has no automated coverage** — the unit tests mock the Gemini client, and the e2e tests exercise translation only. Do one manual run of the `translate` job and confirm the branch and MR appear before relying on it.
-
----
-
-## Architecture
-
-### System Diagram
-
-```mermaid
-graph TB
-    subgraph "Developer Machine"
-        USER["Developer"]
-        SCANNER["i18n Scanner"]
-        CODEBASE["Project Codebase"]
-    end
-
-    subgraph "Docker Network"
-        subgraph "GitLab CE Container"
-            GITLAB_UI["GitLab UI<br/>(pipeline view / Run pipeline)"]
-            GITLAB_REPO["Git Repository<br/>locales/*.json + hash manifest"]
-            GITLAB_API["GitLab API"]
-            GITLAB_CI_ENGINE["CI/CD Engine"]
-        end
-
-        subgraph "GitLab Runner Container"
-            RUNNER["Job Executor"]
-        end
-
-        subgraph "Ephemeral CI Container (node:20-alpine)"
-            direction TB
-            CI_FETCH["Fetch existing translations<br/>+ .translation-hashes.json"]
-            CI_COMPARE["Compare & extract<br/>new/changed keys"]
-            CI_GEMINI_LOOP["For each language:<br/>send keys + context"]
-            CI_FILL["Merge translations<br/>update hash manifest"]
-            CI_BRANCH["Create branch translate/..."]
-            CI_MR["Create Merge Request"]
-        end
-    end
-
-    GEMINI["Gemini API<br/>gemini-2.0-flash"]
-
-    %% i18n scanner flow
-    USER -->|"runs scanner"| SCANNER
-    SCANNER -->|"scans"| CODEBASE
-    SCANNER -->|"generates en-US.json"| GITLAB_REPO
-    USER -->|"git push"| GITLAB_REPO
-
-    %% Trigger flow
-    USER -->|"clicks manual translate job"| GITLAB_UI
-    GITLAB_UI -->|"starts job"| GITLAB_CI_ENGINE
-    GITLAB_CI_ENGINE -->|"dispatches job"| RUNNER
-    RUNNER -->|"spins up"| CI_FETCH
-
-    %% CI pipeline flow
-    CI_FETCH -->|"read existing"| GITLAB_REPO
-    CI_FETCH --> CI_COMPARE
-    CI_COMPARE --> CI_GEMINI_LOOP
-    CI_GEMINI_LOOP -->|"only new/changed keys"| GEMINI
-    GEMINI -->|"translated JSON"| CI_GEMINI_LOOP
-    CI_GEMINI_LOOP --> CI_FILL
-    CI_FILL --> CI_BRANCH
-    CI_BRANCH -->|"push branch (PROJECT_TOKEN)"| GITLAB_REPO
-    CI_BRANCH --> CI_MR
-    CI_MR -->|"POST /merge_requests"| GITLAB_API
-
-    %% Review
-    GITLAB_API -->|"MR ready for review"| USER
+```text
+docker-compose.yml          Local GitLab and Runner
+.gitlab-ci.yml              Test and manual translation jobs
+setup.sh                    Local GitLab startup helper
+locales/en-US.json          Source strings and context
+tools/translate/src/        Translation implementation and unit tests
+tools/translate/e2e/        Real Gemini integration tests
 ```
-
-### Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant Scanner as i18n Scanner
-    participant Repo as GitLab Repo
-    participant UI as GitLab UI
-    participant CI as GitLab CI
-    participant LLM as Gemini API
-
-    Dev->>Scanner: Run i18n scanner
-    Scanner->>Scanner: Scan codebase for translation keys + context
-    Scanner-->>Dev: Generate en-US.json
-    Dev->>Repo: git push (locales/*.json)
-
-    Dev->>UI: Click manual "translate" job (or Run pipeline)
-    UI->>CI: Start translate job
-    Note over CI: .gitlab-ci.yml (translate job)
-
-    CI->>Repo: Fetch existing ja.json, zh.json, fr.json + hash manifest
-    Repo-->>CI: Existing translation files
-    Note over Repo: locales/*.json + .translation-hashes.json
-
-    CI->>CI: Compare and extract new/changed keys
-    Note over CI: tools/translate/src/translate.ts<br/>parseSourceMap() → filter()
-
-    loop For each language
-        CI->>LLM: Send new/changed keys + context
-        Note over CI,LLM: tools/translate/src/gemini.ts<br/>buildPrompt() → generateContent()
-        LLM-->>CI: Translated keys
-        CI->>CI: Validate (placeholders, value types)
-        Note over CI: tools/translate/src/validate.ts<br/>rejected keys stay stale, retried next run
-        CI->>CI: Fill accepted translations into map
-    end
-
-    CI->>CI: Merge translations, update hash manifest, write files
-    Note over CI: tools/translate/src/translate.ts<br/>writeJsonFile()
-
-    CI->>Repo: Push branch (PROJECT_TOKEN)
-    CI->>Repo: Create Merge Request
-    Note over CI,Repo: .gitlab-ci.yml (git + GitLab API)
-
-    Repo-->>Dev: MR ready for review
-    Dev->>Repo: Review and merge MR
-```
-
-### Pipeline Stages
-
-| Stage | Description | File(s) |
-|-------|-------------|---------|
-| **Test** | On every push, runs unit tests for the translation tool (prompt building, response parsing, output validation, differential translation logic). | `.gitlab-ci.yml` (`test` job), `tools/translate/src/*.test.ts` |
-| **Trigger** | Developer clicks the manual `translate` job in the pipeline view (or uses the Run pipeline form to override `TARGET_LANGUAGES`). Translation is never auto-triggered by git push, to control Gemini API costs. | GitLab UI |
-| **Dispatch** | GitLab CI engine dispatches the translate job to the Runner, which spins up an ephemeral `node:20-alpine` container. | `.gitlab-ci.yml` |
-| **Fetch existing** | For each target language, reads the existing translation file (e.g. `fr.json`) and the hash manifest from the repository. Returns `{}` if a file doesn't exist yet. | `tools/translate/src/translate.ts` — `readJsonFileIfExists()` |
-| **Compare & extract** | Parses source entries (value + context), then compares against existing translations and the hash manifest. Keys that are missing, or whose English value or context changed since last translation, are marked for translation. | `tools/translate/src/translate.ts` — `parseSourceMap()`, `entries.filter()` |
-| **Translate** | For each language, sends only the untranslated keys (with their values and context) to the Gemini API. Languages with no new keys are skipped entirely. | `tools/translate/src/gemini.ts` — `buildPrompt()`, `translate()` |
-| **Validate** | Checks every returned value: non-empty string, placeholder names identical to the source. Rejected keys are logged, excluded from the merge, and stay stale in the manifest so the next run retries them. | `tools/translate/src/validate.ts` — `validateTranslations()` |
-| **Merge & write** | Merges new translations over existing ones (`{ ...existing, ...new }`), removes keys that no longer exist in source, writes the output file and updates the hash manifest. | `tools/translate/src/translate.ts` — `writeJsonFile()` |
-| **Branch & MR** | Creates a new git branch (`translate/YYYYMMDD-HHMMSS`), commits the changed locale files, pushes the branch using the `PROJECT_TOKEN` access token, and creates a Merge Request via the GitLab API with `remove_source_branch=true`. | `.gitlab-ci.yml` — git commands + `curl` to GitLab API |
-| **Review** | Developer receives the MR, reviews the translation diff, and merges. | GitLab UI |
-
----
-
-## Version
-
-**Version:** 5.0.0
-**Changes from 4.x:**
-- Removed the GitLab Pages trigger page — GitLab's built-in manual `translate` job is the trigger (no trigger token, no Pages, no browser→API CORS surface)
-- Edited English copy now re-translates: `locales/.translation-hashes.json` records the source hash (English value + context) each key was last translated from
-- Branch push authenticates with a `PROJECT_TOKEN` project access token (the CI job token cannot push by default)
-
----
-
-**Need help?** Check the troubleshooting section or open an issue.

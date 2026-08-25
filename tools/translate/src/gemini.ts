@@ -1,5 +1,7 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import type { MergedEntry, TranslationMap } from "./types.js";
+
+export const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
 
 /**
  * The entry as the translator effectively sees it: an empty context is no
@@ -70,11 +72,15 @@ export function parseResponse(response: string): TranslationMap {
 }
 
 export class GeminiTranslator {
-  private model;
+  private client: GoogleGenAI;
+  private model: string;
 
-  constructor(apiKey: string) {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    this.model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  constructor(
+    apiKey: string,
+    model = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL
+  ) {
+    this.client = new GoogleGenAI({ apiKey });
+    this.model = model;
   }
 
   async translate(
@@ -83,9 +89,21 @@ export class GeminiTranslator {
   ): Promise<TranslationMap> {
     const prompt = buildPrompt(entries, targetLanguage);
 
-    const result = await this.model.generateContent(prompt);
-    const response = result.response.text();
+    const response = await this.client.models.generateContent({
+      model: this.model,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseJsonSchema: {
+          type: "object",
+          additionalProperties: { type: "string" },
+        },
+      },
+    });
+    if (!response.text) {
+      throw new Error("Gemini returned an empty response");
+    }
 
-    return parseResponse(response);
+    return parseResponse(response.text);
   }
 }

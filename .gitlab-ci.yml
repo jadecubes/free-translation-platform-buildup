@@ -21,7 +21,7 @@ translate:
   image: node:20-alpine
   before_script:
     # Install git for committing results
-    - apk add --no-cache git curl
+    - apk add --no-cache git
     # Configure git for commits
     - git config --global user.email "translator@ci.local"
     - git config --global user.name "Translation Bot"
@@ -49,18 +49,13 @@ translate:
         echo "Creating branch $BRANCH_NAME..."
         git checkout -b "$BRANCH_NAME"
         git commit -m "chore: update translations"
-        # http.sslVerify=false: local GitLab uses a self-signed certificate
-        git -c http.sslVerify=false push \
+        git push \
+          -o merge_request.create \
+          -o "merge_request.target=$CI_COMMIT_REF_NAME" \
+          -o merge_request.remove_source_branch \
+          -o "merge_request.title=chore: update translations" \
           "${CI_SERVER_PROTOCOL}://oauth2:${PROJECT_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/${CI_PROJECT_PATH}.git" \
           "$BRANCH_NAME"
-        echo "Creating Merge Request..."
-        curl --fail --insecure --request POST \
-          --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests" \
-          --form "source_branch=$BRANCH_NAME" \
-          --form "target_branch=$CI_COMMIT_REF_NAME" \
-          --form "title=chore: update translations" \
-          --form "remove_source_branch=true"
       fi
   rules:
     - when: manual

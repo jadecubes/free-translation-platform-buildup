@@ -1,6 +1,21 @@
-import { describe, it, expect } from "vitest";
-import { buildPrompt, parseResponse } from "./gemini.js";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { buildPrompt, GeminiTranslator, parseResponse } from "./gemini.js";
 import type { MergedEntry } from "./types.js";
+
+const { generateContent } = vi.hoisted(() => ({
+  generateContent: vi.fn(),
+}));
+
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class {
+    models = { generateContent };
+  },
+}));
+
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe("parseResponse", () => {
   it("parses clean JSON", () => {
@@ -62,5 +77,42 @@ describe("buildPrompt", () => {
     const prompt = buildPrompt(entries, "French");
     expect(prompt).toContain('"a"');
     expect(prompt).toContain('"b"');
+  });
+});
+
+describe("GeminiTranslator", () => {
+  it("requests structured JSON from the configured model", async () => {
+    generateContent.mockResolvedValue({ text: '{"submit":"Soumettre"}' });
+    const translator = new GeminiTranslator("test-key", "gemini-test");
+
+    const result = await translator.translate(
+      [{ key: "submit", value: "Submit", context: "Button on forms" }],
+      "French"
+    );
+
+    expect(result).toEqual({ submit: "Soumettre" });
+    expect(generateContent).toHaveBeenCalledWith({
+      model: "gemini-test",
+      contents: expect.stringContaining("English to French"),
+      config: {
+        responseMimeType: "application/json",
+        responseJsonSchema: {
+          type: "object",
+          additionalProperties: { type: "string" },
+        },
+      },
+    });
+  });
+
+  it("uses GEMINI_MODEL when no model is passed", async () => {
+    vi.stubEnv("GEMINI_MODEL", "gemini-from-env");
+    generateContent.mockResolvedValue({ text: '{"submit":"Soumettre"}' });
+    const translator = new GeminiTranslator("test-key");
+
+    await translator.translate([{ key: "submit", value: "Submit" }], "French");
+
+    expect(generateContent).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gemini-from-env" })
+    );
   });
 });

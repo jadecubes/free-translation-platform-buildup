@@ -5,6 +5,7 @@
 weblate-data/
 postgres-data/
 gitlab-data/
+gitlab-runner-config/
 
 # Backups
 *.tar.gz

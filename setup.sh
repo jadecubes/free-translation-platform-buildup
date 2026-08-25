@@ -14,7 +14,6 @@ if [ ! -f .env ]; then
     echo ""
     echo "Please edit .env and set:"
     echo "  - GITLAB_ROOT_PASSWORD"
-    echo "  - GEMINI_API_KEY"
     echo ""
     echo "Then run this script again."
     exit 0
@@ -23,9 +22,8 @@ fi
 # Check required env vars
 source .env
 
-if [ -z "$GEMINI_API_KEY" ] || [ "$GEMINI_API_KEY" = "your_gemini_api_key_here" ]; then
-    echo "Error: GEMINI_API_KEY not set in .env"
-    echo "Get your API key from: https://aistudio.google.com/app/apikey"
+if [ -z "$GITLAB_ROOT_PASSWORD" ] || [ "$GITLAB_ROOT_PASSWORD" = "gitlab_admin_password" ]; then
+    echo "Error: GITLAB_ROOT_PASSWORD not set in .env"
     exit 1
 fi
 
@@ -40,7 +38,7 @@ echo ""
 # Wait for GitLab to be healthy
 timeout=300
 while [ $timeout -gt 0 ]; do
-    if docker exec gitlab curl -s http://localhost/-/health > /dev/null 2>&1; then
+    if docker exec gitlab curl -s http://localhost:8081/-/health > /dev/null 2>&1; then
         echo "GitLab is ready!"
         break
     fi
@@ -51,17 +49,18 @@ done
 
 if [ $timeout -le 0 ]; then
     echo "GitLab is still starting. Check 'docker logs gitlab' for status."
+    exit 1
 fi
 
 echo ""
 echo "=== Setup Complete ==="
 echo ""
 echo "Next steps:"
-echo "1. Open https://gitlab.local:8081"
-echo "2. Login with: root / $GITLAB_ROOT_PASSWORD"
-echo "3. Create a new project"
-echo "4. Register GitLab Runner:"
-echo "   docker exec -it gitlab-runner gitlab-runner register"
-echo "5. Add your translation files and push!"
+echo "1. Add '127.0.0.1 gitlab.local' to /etc/hosts if needed"
+echo "2. Open http://gitlab.local:8081"
+echo "3. Login as root using the password from .env"
+echo "4. Create a new project"
+echo "5. Register GitLab Runner using the command in README.md"
+echo "6. Add your translation files and push!"
 echo ""
 echo "See README.md for detailed instructions."
