@@ -25,7 +25,9 @@ export function extractPlaceholders(text: string): Set<string> {
  * and whose placeholder names match the source exactly. Rejected keys are
  * simply absent from `accepted`, so upstream they join droppedKeys — their
  * hash is not recorded and they are retried on the next run instead of being
- * written to disk and marked up to date.
+ * written to disk and marked up to date. Keys the model returned but was
+ * never asked for are ignored: the merge only adds accepted keys, so they
+ * cannot overwrite anything.
  */
 export function validateTranslations(
   requested: MergedEntry[],
@@ -41,24 +43,23 @@ export function validateTranslations(
     const value = candidate[entry.key];
 
     if (typeof value !== "string" || value.trim() === "") {
+      // Truncated: a wrong-shaped value can be arbitrarily large
+      const shown = JSON.stringify(value)?.slice(0, 80) ?? String(value);
       rejected.push({
         key: entry.key,
-        reason: `expected a non-empty string, got ${JSON.stringify(value)}`,
+        reason: `expected a non-empty string, got ${shown}`,
       });
       continue;
     }
 
     const wanted = extractPlaceholders(entry.value);
     const got = extractPlaceholders(value);
-    const missing = [...wanted].filter((name) => !got.has(name));
-    const invented = [...got].filter((name) => !wanted.has(name));
-    if (missing.length > 0 || invented.length > 0) {
-      const parts = [];
-      if (missing.length > 0) parts.push(`missing {${missing.join("}, {")}}`);
-      if (invented.length > 0) parts.push(`invented {${invented.join("}, {")}}`);
+    const sameNames =
+      wanted.size === got.size && [...wanted].every((name) => got.has(name));
+    if (!sameNames) {
       rejected.push({
         key: entry.key,
-        reason: `placeholder mismatch: ${parts.join("; ")}`,
+        reason: `placeholder mismatch: source has [${[...wanted].join(", ")}], translation has [${[...got].join(", ")}]`,
       });
       continue;
     }
@@ -66,8 +67,5 @@ export function validateTranslations(
     accepted[entry.key] = value;
   }
 
-  // Keys the model returned but nobody asked for are dropped without ceremony:
-  // they cannot overwrite anything (the merge only adds accepted keys), and
-  // most are artifacts like a stray "note" field.
   return { accepted, rejected };
 }
