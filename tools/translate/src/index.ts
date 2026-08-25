@@ -41,7 +41,7 @@ async function main() {
       const unchanged = r.totalKeys - r.requestedKeys;
       console.log(`  ${r.language}: ${r.translatedKeys} translated, ${unchanged} unchanged (${r.totalKeys} total)`);
       if (r.droppedKeys.length > 0) {
-        console.warn(`    the translator returned nothing for ${r.droppedKeys.length} key(s), left untranslated: ${r.droppedKeys.join(", ")}`);
+        console.warn(`    ${r.droppedKeys.length} key(s) left untranslated (not returned, or rejected by validation): ${r.droppedKeys.join(", ")}`);
       }
     }
     if (failed.length > 0) {

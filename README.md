@@ -15,6 +15,7 @@ Push en-US.json → run the manual "translate" CI job (pipeline view or Run pipe
 - Context-aware translations using Gemini AI
 - No extra UI or server — GitLab's built-in manual job button is the trigger
 - Only translates new keys and keys whose English text changed (cost-efficient)
+- Validates model output — placeholder and type checks — before anything is written
 - Creates Merge Requests for review before merging
 
 ---
@@ -102,6 +103,8 @@ Each key maps to a `{ value, context }` object:
 
 A key is sent to Gemini when it is **new** (missing from the target file) or its **English value or context changed** since it was last translated. Change detection uses `locales/.translation-hashes.json`, a generated manifest recording the source hash (English value + context) each key was last translated from — commit it along with the locale files. Keys present in a target file but absent from the manifest (files predating it) are trusted as-is and only get their hash backfilled.
 
+What comes back from Gemini is validated before it is written: values must be non-empty strings, and the placeholder names in each translation must match the source exactly (`{name}`, `{{name}}`, and ICU argument names). A key that fails — or that Gemini fails to return — is logged, left untranslated, and requested again on the next run; it is never written to disk or marked up to date.
+
 ### Missing Context Warnings
 
 When CI detects keys without context, it logs warnings:
@@ -115,6 +118,10 @@ Add context to your i18n annotations for better translation quality.
 ```
 
 Translation still proceeds (soft mode).
+
+### Using the output at runtime
+
+The generated files are plain flat JSON for any i18n library. Two conventions the consuming app should follow: fall back to the `en-US` value when a key is missing from a target file (a key can be legitimately absent — rejected by validation and awaiting the next run), and never render the key name itself. Make the fallback loud in development and silent in production.
 
 ---
 
@@ -229,29 +236,13 @@ The project has two levels of tests: **unit tests** (no API key, run fast with m
 
 Test the internal logic without calling the Gemini API. Gemini is mocked — these run in ~150ms.
 
-| File | Test | What it proves |
-|------|------|----------------|
-| `gemini.test.ts` | parses clean JSON | `parseResponse()` returns correct object from raw JSON |
-| `gemini.test.ts` | strips \`\`\`json fences | `parseResponse()` handles Gemini wrapping response in markdown code blocks |
-| `gemini.test.ts` | strips bare \`\`\` fences | `parseResponse()` handles Gemini wrapping response without `json` tag |
-| `gemini.test.ts` | throws on invalid JSON | `parseResponse()` gives a clear error when Gemini returns garbage |
-| `gemini.test.ts` | handles whitespace around JSON | `parseResponse()` trims whitespace before parsing |
-| `gemini.test.ts` | includes key, value, and context | `buildPrompt()` constructs prompt with all entry fields for Gemini |
-| `gemini.test.ts` | omits context line when undefined | `buildPrompt()` skips context for keys without it |
-| `gemini.test.ts` | includes multiple entries | `buildPrompt()` handles batch of keys in one prompt |
-| `translate.test.ts` | parses entries with value and context | `parseSourceMap()` correctly reads combined `{ value, context }` format |
-| `translate.test.ts` | detects keys with missing context | `parseSourceMap()` identifies keys without context for warnings |
-| `translate.test.ts` | handles empty source map | `parseSourceMap()` returns empty arrays for empty input |
-| `translate.test.ts` | translates all keys when no existing file | `translate()` sends all keys to Gemini and writes output file |
-| `translate.test.ts` | only translates new keys | `translate()` skips existing keys and only sends missing ones to Gemini |
-| `translate.test.ts` | skips when all keys translated | `translate()` never calls Gemini when nothing is new |
-| `translate.test.ts` | removes stale keys not in source | `translate()` cleans up keys deleted from `en-US.json` |
-| `translate.test.ts` | re-translates keys whose source value changed | hash manifest triggers re-translation when English copy is edited |
-| `translate.test.ts` | re-translates keys whose context changed | sharpening a key's context re-translates it, since context is sent to Gemini too |
-| `translate.test.ts` | does not re-translate when an edit leaves the prompt unchanged | the hash shares the prompt's normalization, so a no-op edit (e.g. adding an empty context) costs nothing |
-| `translate.test.ts` | keeps the stale hash when the translator omits a requested key | a dropped key is retried next run instead of being recorded as up to date |
-| `translate.test.ts` | trusts existing translations without manifest and backfills hashes | pre-manifest translation files don't cause a re-translation storm |
-| `translate.test.ts` | handles multiple target languages | `translate()` produces output files for each language |
+The test names are the documentation — `npx vitest run` lists them all. What each file covers:
+
+| File | Tests | Covers |
+|------|-------|--------|
+| `gemini.test.ts` | 8 | `buildPrompt()` includes key/value/context; `parseResponse()` strips markdown fences, trims, throws clearly on invalid JSON |
+| `validate.test.ts` | 10 | `extractPlaceholders()` for `{name}`, `{{name}}`, ICU argument names; `validateTranslations()` rejects mangled, missing, or invented placeholders and non-string or empty values, and discards unrequested keys |
+| `translate.test.ts` | 14 | Differential logic with a mocked Gemini: new/changed/unchanged keys, hash-manifest round-trip, backfill for pre-manifest files, stale-key removal, dropped and rejected keys kept stale and retried, multiple languages |
 
 ### E2E Tests (`tools/translate/e2e/`)
 
@@ -377,6 +368,16 @@ The push to the translation branch needs a project access token with `write_repo
 
 ---
 
+## Limitations
+
+Known and deliberate — the MR review step is the backstop for all of them.
+
+- **A human correction survives only until the English changes.** Fixing a translation in the MR works, and the fix is kept (the hash matches, so the key is skipped). But there is no "reviewed" flag: the next edit to that key's English value or context re-translates it and overwrites the correction without warning.
+- **Validation checks form, not meaning.** Placeholders and value types are enforced; wrong word choice, wrong tone, or wrong formality sail through. The MR diff is the only quality gate.
+- **Only `{name}`, `{{name}}` and ICU argument names are checked.** printf-style placeholders (`%s`, `%d`) are invisible to the validator.
+- **No retry or backoff.** A rate limit or transient API error fails that language for the run (other languages are unaffected). Re-running the job retries everything still stale.
+- **One prompt per language.** A very large batch of new keys could exceed the model's output limit; the truncated JSON fails to parse and the language fails that run. No chunking.
+
 ## Before pointing this at a real GitLab
 
 This repo is a self-contained demo running GitLab locally with a self-signed certificate. Two things are set up for that and should change first:
@@ -482,7 +483,9 @@ sequenceDiagram
         CI->>LLM: Send new/changed keys + context
         Note over CI,LLM: tools/translate/src/gemini.ts<br/>buildPrompt() → generateContent()
         LLM-->>CI: Translated keys
-        CI->>CI: Fill translations into map
+        CI->>CI: Validate (placeholders, value types)
+        Note over CI: tools/translate/src/validate.ts<br/>rejected keys stay stale, retried next run
+        CI->>CI: Fill accepted translations into map
     end
 
     CI->>CI: Merge translations, update hash manifest, write files
@@ -500,12 +503,13 @@ sequenceDiagram
 
 | Stage | Description | File(s) |
 |-------|-------------|---------|
-| **Test** | On every push, runs unit tests for the translation tool (prompt building, response parsing, differential translation logic). | `.gitlab-ci.yml` (`test` job), `tools/translate/src/*.test.ts` |
+| **Test** | On every push, runs unit tests for the translation tool (prompt building, response parsing, output validation, differential translation logic). | `.gitlab-ci.yml` (`test` job), `tools/translate/src/*.test.ts` |
 | **Trigger** | Developer clicks the manual `translate` job in the pipeline view (or uses the Run pipeline form to override `TARGET_LANGUAGES`). Translation is never auto-triggered by git push, to control Gemini API costs. | GitLab UI |
 | **Dispatch** | GitLab CI engine dispatches the translate job to the Runner, which spins up an ephemeral `node:20-alpine` container. | `.gitlab-ci.yml` |
 | **Fetch existing** | For each target language, reads the existing translation file (e.g. `fr.json`) and the hash manifest from the repository. Returns `{}` if a file doesn't exist yet. | `tools/translate/src/translate.ts` — `readJsonFileIfExists()` |
 | **Compare & extract** | Parses source entries (value + context), then compares against existing translations and the hash manifest. Keys that are missing, or whose English value or context changed since last translation, are marked for translation. | `tools/translate/src/translate.ts` — `parseSourceMap()`, `entries.filter()` |
 | **Translate** | For each language, sends only the untranslated keys (with their values and context) to the Gemini API. Languages with no new keys are skipped entirely. | `tools/translate/src/gemini.ts` — `buildPrompt()`, `translate()` |
+| **Validate** | Checks every returned value: non-empty string, placeholder names identical to the source. Rejected keys are logged, excluded from the merge, and stay stale in the manifest so the next run retries them. | `tools/translate/src/validate.ts` — `validateTranslations()` |
 | **Merge & write** | Merges new translations over existing ones (`{ ...existing, ...new }`), removes keys that no longer exist in source, writes the output file and updates the hash manifest. | `tools/translate/src/translate.ts` — `writeJsonFile()` |
 | **Branch & MR** | Creates a new git branch (`translate/YYYYMMDD-HHMMSS`), commits the changed locale files, pushes the branch using the `PROJECT_TOKEN` access token, and creates a Merge Request via the GitLab API with `remove_source_branch=true`. | `.gitlab-ci.yml` — git commands + `curl` to GitLab API |
 | **Review** | Developer receives the MR, reviews the translation diff, and merges. | GitLab UI |

@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { createHash } from "crypto";
 import { join } from "path";
 import { GeminiTranslator, normalizeEntry } from "./gemini.js";
+import { validateTranslations } from "./validate.js";
 import type {
   SourceMap,
   TranslationMap,
@@ -106,7 +107,15 @@ export async function translate(
         console.log(`  No new or changed keys — skipping translation for ${language}`);
       } else {
         console.log(`  Translating ${requestedKeys} new/updated key(s) (${totalKeys - requestedKeys} unchanged kept)...`);
-        newTranslations = await translator.translate(entriesToTranslate, language);
+        const candidate = await translator.translate(entriesToTranslate, language);
+        // Model output is untrusted: only keys that pass validation reach the
+        // merge. Rejected keys fall through to droppedKeys below, keep their
+        // stale hash, and are retried next run.
+        const { accepted, rejected } = validateTranslations(entriesToTranslate, candidate);
+        for (const r of rejected) {
+          console.warn(`  Rejected "${r.key}": ${r.reason}`);
+        }
+        newTranslations = accepted;
       }
 
       // Report what the translator actually returned, which is what the manifest
